@@ -163,31 +163,26 @@ async function handleTrades() {
 }
 
 async function handleScan() {
-  await sendTelegram(`🔍 <b>Scan manual iniciado...</b>\n\n<i>Aguarde — pode levar até 2 minutos para todos os ativos.</i>`)
-
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
-  try {
-    const res = await fetch(`${appUrl}/api/cron/scan`, {
-      headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    // O scan vai enviar o próprio resumo via Telegram ao terminar
-  } catch (e: any) {
-    await sendTelegram(`❌ <b>Scan falhou:</b> ${e.message}`)
-  }
+
+  // Dispara sem await — scan demora ~2 min e enviará o resumo sozinho via Telegram
+  fetch(`${appUrl}/api/cron/scan`, {
+    headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
+  }).catch(() => {/* silencioso */})
+
+  await sendTelegram(
+    `🔍 <b>Scan iniciado em todos os 15 ativos</b>\n\n` +
+    `<i>O resumo chega aqui em ~2 minutos.</i>`
+  )
 }
 
 async function handleMacro() {
-  await sendTelegram(`📡 <b>Atualizando macro...</b>`)
-
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
-  try {
-    const res  = await fetch(`${appUrl}/api/cron/macro`, {
-      headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    // O macro cron envia o próprio Telegram ao terminar
-  } catch (e: any) {
-    await sendTelegram(`❌ <b>Macro falhou:</b> ${e.message}`)
-  }
+
+  // Dispara sem await — macro envia o próprio Telegram ao terminar
+  fetch(`${appUrl}/api/cron/macro`, {
+    headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
+  }).catch(() => {/* silencioso */})
+
+  await sendTelegram(`📡 <b>Atualizando macro...</b>\n\n<i>Resultado chega em instantes.</i>`)
 }
