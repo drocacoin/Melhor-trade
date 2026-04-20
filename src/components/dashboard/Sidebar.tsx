@@ -39,7 +39,7 @@ export function Sidebar() {
       </nav>
       <div className="mt-auto px-2 text-xs text-gray-600">
         <p>Scanner: 4h</p>
-        <p className="mt-1">11 ativos · Scanner 4h</p>
+        <p className="mt-1">15 ativos · Scanner 4h</p>
       </div>
     </aside>
   )

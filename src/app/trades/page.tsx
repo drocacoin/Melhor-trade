@@ -28,6 +28,7 @@ export default function TradesPage() {
   const [prices, setPrices]       = useState<Record<string, number>>({})
   const [form, setForm]           = useState(empty)
   const [closing, setClosing]     = useState<{ id: number; price: string } | null>(null)
+  const [editStop, setEditStop]   = useState<{ id: number; stop: string } | null>(null)
   const [showForm, setShowForm]   = useState(false)
   const [loading, setLoading]     = useState(false)
   const [tab, setTab]             = useState<'open' | 'closed'>('open')
@@ -80,6 +81,17 @@ export default function TradesPage() {
       body: JSON.stringify({ close_price: +closing.price }),
     })
     setClosing(null); setLoading(false); load()
+  }
+
+  async function updateStop() {
+    if (!editStop) return
+    setLoading(true)
+    await fetch(`/api/trades/${editStop.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stop_price: +editStop.stop }),
+    })
+    setEditStop(null); setLoading(false); load()
   }
 
   const open        = trades.filter(t => t.status === 'open')
@@ -311,11 +323,18 @@ export default function TradesPage() {
                     )}
                     {t.notes && <span className="text-xs text-gray-500">{t.notes}</span>}
                   </div>
-                  <button
-                    onClick={() => setClosing({ id: t.id, price: livePrice ? livePrice.toString() : '' })}
-                    className="text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 px-3 py-1.5 rounded transition-colors font-medium">
-                    Fechar posição
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setEditStop({ id: t.id, stop: t.stop_price?.toString() ?? '' })}
+                      className="text-xs bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 px-3 py-1.5 rounded transition-colors font-medium">
+                      ✏ Stop
+                    </button>
+                    <button
+                      onClick={() => setClosing({ id: t.id, price: livePrice ? livePrice.toString() : '' })}
+                      className="text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 px-3 py-1.5 rounded transition-colors font-medium">
+                      Fechar posição
+                    </button>
+                  </div>
                 </div>
               </div>
             )
@@ -364,6 +383,32 @@ export default function TradesPage() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Edit stop modal */}
+      {editStop && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80">
+            <h3 className="font-semibold mb-1">Atualizar Stop Loss</h3>
+            <p className="text-xs text-gray-500 mb-4">Mover stop para breakeven ou trailing</p>
+            <label className="text-xs text-gray-400 flex flex-col gap-1 mb-4">
+              Novo stop ($)
+              <input type="number" step="any" value={editStop.stop}
+                onChange={e => setEditStop(s => s ? { ...s, stop: e.target.value } : null)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 mt-1" autoFocus />
+            </label>
+            <div className="flex gap-3">
+              <button onClick={updateStop} disabled={!editStop.stop || loading}
+                className="flex-1 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black font-semibold py-2 rounded-lg text-sm">
+                Confirmar
+              </button>
+              <button onClick={() => setEditStop(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded-lg text-sm">
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

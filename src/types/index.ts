@@ -78,6 +78,8 @@ export interface Trade {
   pnl_usd: number | null
   status: 'open' | 'closed' | 'cancelled'
   notes: string | null
+  alerted_target1: boolean | null
+  alerted_target2: boolean | null
 }
 
 export interface TradeReview {
