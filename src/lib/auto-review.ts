@@ -50,18 +50,35 @@ export async function autoReview(tradeId: number): Promise<ReviewResult | null> 
   const { data: trade } = await db.from('trades').select('*').eq('id', tradeId).single()
   if (!trade) return null
 
-  // ── Fetch snapshots closest to entry date ────────────────────────────────────
+  // ── Fetch snapshots: tenta data de entrada, fallback para os mais recentes ───
   const entryDate = trade.opened_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
-  const { data: snaps } = await db
+
+  let snaps: any[] | null = null
+
+  // 1ª tentativa: snapshots do dia de entrada
+  const { data: snapsEntry } = await db
     .from('snapshots')
     .select('*')
     .eq('asset', trade.asset)
     .gte('captured_at', `${entryDate}T00:00:00`)
     .lte('captured_at', `${entryDate}T23:59:59`)
-    .order('captured_at', { ascending: true })
+    .order('captured_at', { ascending: false })
     .limit(20)
 
-  // One snapshot per timeframe
+  if (snapsEntry?.length) {
+    snaps = snapsEntry
+  } else {
+    // Fallback: snapshots mais recentes disponíveis (qualquer data)
+    const { data: snapsRecent } = await db
+      .from('snapshots')
+      .select('*')
+      .eq('asset', trade.asset)
+      .order('captured_at', { ascending: false })
+      .limit(20)
+    snaps = snapsRecent
+  }
+
+  // One snapshot per timeframe (mais recente de cada)
   const tfMap: Record<string, any> = {}
   for (const s of snaps ?? []) {
     if (!tfMap[s.timeframe]) tfMap[s.timeframe] = s

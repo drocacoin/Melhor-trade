@@ -68,10 +68,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         (review.new_rule ? `\n📌 <b>Nova regra:</b> ${safe(review.new_rule)}` : '')
       )
     } else {
-      // autoReview falhou (sem snapshots, sem API key, etc) — avisa mas não quebra
+      // autoReview falhou por erro técnico (API, JSON parse, etc)
       await sendTelegram(
-        `⚠️ <b>Review automático indisponível — ${trade.asset}</b>\n` +
-        `<i>Sem dados técnicos suficientes na data de entrada. Faça o review manual no app.</i>`
+        `⚠️ <b>Review automático falhou — ${trade.asset}</b>\n` +
+        `<i>Erro interno. Verifique os logs do Vercel.</i>`
       )
     }
 
