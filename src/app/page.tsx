@@ -23,17 +23,30 @@ function gradeColor(grade: string) {
 
 async function getData() {
   const db = supabaseAdmin()
-  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }, { data: perf }, prices] =
-    await Promise.all([
+
+  // Separated to avoid TypeScript inference issues with mixed return types
+  const [
+    [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }, { data: perf }],
+    priceEntries,
+  ] = await Promise.all([
+    Promise.all([
       db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(400),
       db.from('trades').select('*').eq('status', 'open'),
       db.from('signals').select('*').eq('status', 'active').order('detected_at', { ascending: false }).limit(10),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
       db.from('performance_summary').select('*'),
-      Promise.all(
-        ASSETS.map(a => fetchLivePrice(a).then(p => [a, p] as const).catch(() => [a, 0] as const))
-      ).then(entries => Object.fromEntries(entries) as Record<string, number>),
-    ])
+    ]),
+    Promise.all(
+      ASSETS.map(a =>
+        fetchLivePrice(a)
+          .then(p  => [a, p] as [string, number])
+          .catch(() => [a, 0] as [string, number])
+      )
+    ),
+  ])
+
+  const prices: Record<string, number> = Object.fromEntries(priceEntries)
+
   return {
     snaps:   snaps   ?? [],
     trades:  trades  ?? [],

@@ -137,7 +137,8 @@ export async function fetchLivePrice(asset: string): Promise<number> {
       )
       const json   = await res.json()
       const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []
-      return (closes as (number | null)[]).filter(Boolean).at(-1) ?? 0
+      const validCloses = (closes as (number | null)[]).filter((v): v is number => v != null)
+      return validCloses[validCloses.length - 1] ?? 0
     } catch {
       return 0
     }
