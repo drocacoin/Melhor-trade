@@ -11,7 +11,7 @@ import { Asset } from '@/types'
 
 export const maxDuration = 300  // Vercel Pro — até 5 min por execução
 
-const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 const TIMEFRAMES       = ['1wk', '1d', '4h', '1h']
 
 export async function GET(req: NextRequest) {

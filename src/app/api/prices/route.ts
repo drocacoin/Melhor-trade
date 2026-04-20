@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fetchLivePrice } from '@/lib/fetcher'
 
-const ASSETS = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 
 export const runtime = 'nodejs'
 export const revalidate = 0

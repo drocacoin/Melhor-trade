@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/macro",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/cron/scan?send_summary=true",
       "schedule": "0 9 * * *"
     },

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Trade, Asset, Direction, SetupGrade } from '@/types'
 import { fmtPrice, fmtPct, cn, gradeColor, pnlColor } from '@/lib/utils'
 
-const ASSETS: Asset[]      = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS: Asset[]      = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 const GRADES: SetupGrade[] = ['A+', 'A', 'B', 'C']
 
 const empty = {
@@ -41,7 +41,7 @@ export default function TradesPage() {
 
   const loadPrices = useCallback(async () => {
     try {
-      const res  = await fetch('/api/prices')
+      const res  = await fetch('/api/prices', { cache: 'no-store' })
       const data = await res.json()
       setPrices(data)
       setLastUpdate(new Date())
@@ -51,7 +51,7 @@ export default function TradesPage() {
   useEffect(() => {
     load()
     loadPrices()
-    const interval = setInterval(loadPrices, 30000) // atualiza a cada 30s
+    const interval = setInterval(loadPrices, 10000) // atualiza a cada 10s
     return () => clearInterval(interval)
   }, [load, loadPrices])
 
@@ -85,7 +85,9 @@ export default function TradesPage() {
   const open        = trades.filter(t => t.status === 'open')
   const closed      = trades.filter(t => t.status === 'closed')
   const totalPnl    = closed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0)
-  const winrate     = closed.length ? (closed.filter(t => (t.pnl_usd ?? 0) > 0).length / closed.length) * 100 : null
+  // Considera win se pnl_usd > 0, ou se não tem usd mas pnl_pct > 0
+  const isWin       = (t: Trade) => t.pnl_usd != null ? t.pnl_usd > 0 : (t.pnl_pct ?? 0) > 0
+  const winrate     = closed.length ? (closed.filter(isWin).length / closed.length) * 100 : null
 
   // P&L não realizado total dos trades abertos
   const unrealizedTotal = open.reduce((sum, t) => {
@@ -347,10 +349,10 @@ export default function TradesPage() {
                   <td className="px-4 py-3 font-mono">${fmtPrice(t.entry_price)}</td>
                   <td className="px-4 py-3 font-mono">${fmtPrice(t.close_price ?? 0)}</td>
                   <td className={cn('px-4 py-3 font-mono font-semibold', pnlColor(t.pnl_pct ?? 0))}>
-                    {t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${fmtPct(t.pnl_pct)}` : '—'}
+                    {t.pnl_pct != null ? fmtPct(t.pnl_pct) : '—'}
                   </td>
                   <td className={cn('px-4 py-3 font-mono', pnlColor(t.pnl_usd ?? 0))}>
-                    {t.pnl_usd != null ? `${t.pnl_usd >= 0 ? '+' : ''}$${fmtPrice(t.pnl_usd)}` : '—'}
+                    {t.pnl_usd != null ? `${t.pnl_usd >= 0 ? '+' : ''}$${fmtPrice(Math.abs(t.pnl_usd))}` : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <a href={`/review?trade=${t.id}`} className="text-xs text-emerald-400 hover:underline">Review</a>

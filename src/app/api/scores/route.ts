@@ -4,7 +4,7 @@ import { computeLiveScore } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { fetchFearAndGreed } from '@/lib/fetcher'
 
-const ASSETS = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 
 export const revalidate = 120  // cache 2 min
 

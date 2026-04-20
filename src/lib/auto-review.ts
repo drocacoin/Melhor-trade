@@ -40,15 +40,15 @@ interface ReviewResult {
   forced_entry:       boolean
 }
 
-export async function autoReview(tradeId: number): Promise<void> {
+export async function autoReview(tradeId: number): Promise<ReviewResult | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return
+  if (!apiKey) return null
 
   const db = supabaseAdmin()
 
   // ── Fetch trade ─────────────────────────────────────────────────────────────
   const { data: trade } = await db.from('trades').select('*').eq('id', tradeId).single()
-  if (!trade) return
+  if (!trade) return null
 
   // ── Fetch snapshots closest to entry date ────────────────────────────────────
   const entryDate = trade.opened_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
@@ -161,7 +161,9 @@ Responda APENAS com este JSON (sem markdown, sem texto):
     })
 
     console.log(`[auto-review] Trade ${tradeId} reviewed — ${review.process_class} | ${review.error_category}`)
+    return review
   } catch (e: any) {
     console.error(`[auto-review] Trade ${tradeId} failed:`, e.message)
+    return null
   }
 }

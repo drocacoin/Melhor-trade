@@ -11,6 +11,10 @@ const HL_SYMBOL: Record<string, string> = {
   LINK: 'LINK',
   AVAX: 'AVAX',
   GOLD: 'PAXG',  // PAX Gold — 1 PAXG = 1 troy oz gold
+  XRP:  'XRP',
+  SUI:  'SUI',
+  DOGE: 'DOGE',
+  TAO:  'TAO',   // Bittensor — decentralized AI
 }
 
 const HL_INTERVAL: Record<string, string> = {
@@ -129,7 +133,7 @@ export async function fetchLivePrice(asset: string): Promise<number> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'allMids' }),
-        next: { revalidate: 30 },
+        cache: 'no-store',
       })
       const mids: Record<string, string> = await res.json()
       const coin = HL_SYMBOL[asset]
@@ -168,6 +172,10 @@ const BYBIT_FUNDING_SYMBOL: Record<string, string> = {
   AAVE: 'AAVEUSDT',
   LINK: 'LINKUSDT',
   AVAX: 'AVAXUSDT',
+  XRP:  'XRPUSDT',
+  SUI:  'SUIUSDT',
+  DOGE: 'DOGEUSDT',
+  TAO:  'TAOUSDT',
 }
 
 export async function fetchFundingRate(asset: string): Promise<number | null> {

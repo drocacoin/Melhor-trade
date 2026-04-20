@@ -6,7 +6,7 @@ import { cn, fmtPrice, fmtPct, gradeColor, biasColor, pnlColor } from '@/lib/uti
 
 export const revalidate = 120
 
-const VALID_ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const VALID_ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 const TF_ORDER = ['1wk', '1d', '4h', '1h']
 const TF_LABELS: Record<string, string> = { '1wk': 'Semanal', '1d': 'Diário', '4h': '4 Horas', '1h': '1 Hora' }
 
