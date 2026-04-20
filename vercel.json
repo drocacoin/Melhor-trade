@@ -5,6 +5,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron/scan?secret=mt2026xk9",
+      "schedule": "0 1,5,13,17,21 * * *"
+    },
+    {
       "path": "/api/cron/digest?secret=mt2026xk9",
       "schedule": "0 11 * * 0"
     },

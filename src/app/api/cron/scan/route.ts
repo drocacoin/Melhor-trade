@@ -9,12 +9,10 @@ import { generateSignalAnalysis } from '@/lib/signal-analysis'
 import { fetchSetupHistory, checkCorrelation, suggestRisk, buildExitStrategy, buildConfluence } from '@/lib/signal-context'
 import { Asset } from '@/types'
 
-export const maxDuration = 60
+export const maxDuration = 300  // Vercel Pro — até 5 min por execução
 
 const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
 const TIMEFRAMES       = ['1wk', '1d', '4h', '1h']
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
@@ -68,7 +66,6 @@ export async function GET(req: NextRequest) {
         console.error(`[scan] ${asset} ${tf}:`, e.message)
         results[asset][tf] = `ERROR: ${e.message}`
       }
-      await sleep(300)
     }
 
     if (snapshots['1d']?.bias) biases[asset] = snapshots['1d'].bias
