@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/scan?secret=CRON_SECRET_PLACEHOLDER",
-      "schedule": "0 1,5,9,13,17,21 * * *"
+      "path": "/api/cron/scan?secret=mt2026xk9",
+      "schedule": "0 9 * * *"
     }
   ]
 }
