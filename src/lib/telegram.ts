@@ -65,13 +65,13 @@ export function fmtSignal(
     ? Math.abs((signal.stop - signal.entry_zone_low) / signal.entry_zone_low * 100).toFixed(1)
     : null
 
-  lines.push(
+  lines.push(...([
     '',
     `📍 Entrada:  <code>$${signal.entry_zone_low} – $${signal.entry_zone_high}</code>`,
     `🛑 Stop:     <code>$${signal.stop}</code>${stopPct ? ` (-${stopPct}%)` : ''}`,
     `🎯 Alvo 1:   <code>$${signal.target1}</code>${entryPct ? ` (+${entryPct}%)` : ''} | RR <b>${signal.rr1}:1</b>`,
     signal.target2 ? `🎯 Alvo 2:   <code>$${signal.target2}</code>` : '',
-  ).filter(Boolean as any)
+  ].filter(Boolean) as string[]))
 
   // ── Alerta de correlação ──────────────────────────────────────────────
   if (signal.correlation?.hasAlert) {
