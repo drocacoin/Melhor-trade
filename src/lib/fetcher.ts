@@ -129,7 +129,39 @@ export async function fetchLivePrice(asset: string): Promise<number> {
   return 0
 }
 
-// ─── Funding rate (crypto — Kraken perpetuals not available, skip) ────────────
-export async function fetchFundingRate(_asset: string): Promise<number | null> {
-  return null
+// ─── Funding rate via Bybit (BTC/ETH/SOL — free, no key, no geo block) ───────
+const BYBIT_SYMBOL: Record<string, string> = {
+  BTC: 'BTCUSDT',
+  ETH: 'ETHUSDT',
+  SOL: 'SOLUSDT',
+}
+
+export async function fetchFundingRate(asset: string): Promise<number | null> {
+  const symbol = BYBIT_SYMBOL[asset]
+  if (!symbol) return null
+
+  try {
+    const res  = await fetch(
+      `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`,
+      { next: { revalidate: 300 } }
+    )
+    const json = await res.json()
+    const item = json?.result?.list?.[0]
+    return item?.fundingRate ? parseFloat(item.fundingRate) : null
+  } catch {
+    return null
+  }
+}
+
+// ─── Fear & Greed Index (alternative.me — free, no key) ──────────────────────
+export async function fetchFearAndGreed(): Promise<{ value: number; label: string } | null> {
+  try {
+    const res  = await fetch('https://api.alternative.me/fng/?limit=1', { next: { revalidate: 3600 } })
+    const json = await res.json()
+    const item = json?.data?.[0]
+    if (!item) return null
+    return { value: parseInt(item.value), label: item.value_classification }
+  } catch {
+    return null
+  }
 }
