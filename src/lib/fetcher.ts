@@ -1,8 +1,12 @@
 import { OHLCV } from './indicators'
 
-const TWELVE_KEY = process.env.TWELVE_DATA_API_KEY!
+// ─── Binance (BTC, ETH, SOL) ────────────────────────────────────────────────
+const BINANCE_SYMBOL: Record<string, string> = {
+  BTC: 'BTCUSDT',
+  ETH: 'ETHUSDT',
+  SOL: 'SOLUSDT',
+}
 
-// Binance intervals for crypto (free, no key needed)
 const BINANCE_TF: Record<string, string> = {
   '1wk': '1w',
   '1d':  '1d',
@@ -10,36 +14,17 @@ const BINANCE_TF: Record<string, string> = {
   '1h':  '1h',
 }
 
-const BINANCE_SYMBOL: Record<string, string> = {
-  BTC: 'BTCUSDT',
-  ETH: 'ETHUSDT',
-  SOL: 'SOLUSDT',
-}
-
-// Twelve Data symbols (only for GOLD and OIL)
-const TWELVE_SYMBOL: Record<string, string> = {
-  GOLD: 'XAU/USD',
-  OIL:  'BCO/USD',
-}
-
-const TWELVE_TF: Record<string, string> = {
-  '1wk': '1week',
-  '1d':  '1day',
-  '4h':  '4h',
-  '1h':  '1h',
-}
-
-const OUTPUT_SIZE: Record<string, number> = {
+const BINANCE_LIMIT: Record<string, number> = {
   '1wk': 104,
   '1d':  365,
   '4h':  360,
-  '1h':  720,
+  '1h':  500,
 }
 
 async function fetchCandlesBinance(asset: string, timeframe: string): Promise<OHLCV[]> {
   const symbol   = BINANCE_SYMBOL[asset]
   const interval = BINANCE_TF[timeframe]
-  const limit    = OUTPUT_SIZE[timeframe] ?? 200
+  const limit    = BINANCE_LIMIT[timeframe] ?? 200
 
   const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
   const res  = await fetch(url, { next: { revalidate: 0 } })
@@ -58,61 +43,136 @@ async function fetchCandlesBinance(asset: string, timeframe: string): Promise<OH
   }))
 }
 
-async function fetchCandlesTwelve(asset: string, timeframe: string): Promise<OHLCV[]> {
-  const symbol     = TWELVE_SYMBOL[asset]
-  const interval   = TWELVE_TF[timeframe]
-  const outputsize = OUTPUT_SIZE[timeframe] ?? 200
+// ─── Alpha Vantage (GOLD via XAU/USD FX) ────────────────────────────────────
+const AV_KEY = () => process.env.ALPHA_VANTAGE_KEY!
 
-  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&apikey=${TWELVE_KEY}&format=JSON`
-  const res  = await fetch(url, { next: { revalidate: 0 } })
-  const json = await res.json()
-
-  if (json.status === 'error' || !json.values) {
-    throw new Error(`Twelve Data error for ${asset} ${timeframe}: ${json.message ?? 'unknown'}`)
-  }
-
-  return (json.values as any[])
-    .reverse()
-    .map((v: any) => ({
-      open:   parseFloat(v.open),
-      high:   parseFloat(v.high),
-      low:    parseFloat(v.low),
-      close:  parseFloat(v.close),
-      volume: parseFloat(v.volume ?? '0'),
+function parseAVFx(json: any): OHLCV[] {
+  const key = Object.keys(json).find(k => k.startsWith('Time Series') || k.startsWith('Weekly') || k.startsWith('Monthly'))
+  if (!key) throw new Error(`Alpha Vantage unexpected response: ${JSON.stringify(json).slice(0, 200)}`)
+  const series = json[key] as Record<string, any>
+  return Object.entries(series)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => ({
+      open:   parseFloat(v['1. open']),
+      high:   parseFloat(v['2. high']),
+      low:    parseFloat(v['3. low']),
+      close:  parseFloat(v['4. close']),
+      volume: 0,
     }))
 }
 
-export async function fetchCandles(asset: string, timeframe: string): Promise<OHLCV[]> {
-  if (BINANCE_SYMBOL[asset]) {
-    return fetchCandlesBinance(asset, timeframe)
+function aggregateTo4h(candles1h: OHLCV[]): OHLCV[] {
+  const result: OHLCV[] = []
+  for (let i = 0; i + 3 < candles1h.length; i += 4) {
+    const group = candles1h.slice(i, i + 4)
+    result.push({
+      open:   group[0].open,
+      high:   Math.max(...group.map(c => c.high)),
+      low:    Math.min(...group.map(c => c.low)),
+      close:  group[group.length - 1].close,
+      volume: group.reduce((s, c) => s + c.volume, 0),
+    })
   }
-  return fetchCandlesTwelve(asset, timeframe)
+  return result
 }
 
+async function fetchGoldAlphaVantage(timeframe: string): Promise<OHLCV[]> {
+  const key = AV_KEY()
+
+  if (timeframe === '1wk') {
+    const url = `https://www.alphavantage.co/query?function=FX_WEEKLY&from_symbol=XAU&to_symbol=USD&apikey=${key}`
+    const json = await fetch(url, { next: { revalidate: 0 } }).then(r => r.json())
+    return parseAVFx(json)
+  }
+
+  if (timeframe === '1d') {
+    const url = `https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=XAU&to_symbol=USD&outputsize=full&apikey=${key}`
+    const json = await fetch(url, { next: { revalidate: 0 } }).then(r => r.json())
+    return parseAVFx(json)
+  }
+
+  // 4h e 1h: busca 60min e agrega se necessário
+  const url = `https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=XAU&to_symbol=USD&interval=60min&outputsize=full&apikey=${key}`
+  const json = await fetch(url, { next: { revalidate: 0 } }).then(r => r.json())
+  const candles1h = parseAVFx(json)
+  return timeframe === '4h' ? aggregateTo4h(candles1h) : candles1h
+}
+
+// ─── Yahoo Finance (OIL via BZ=F) ───────────────────────────────────────────
+const YAHOO_OIL_TF: Record<string, { interval: string; range: string }> = {
+  '1wk': { interval: '1wk', range: '2y'  },
+  '1d':  { interval: '1d',  range: '2y'  },
+  '4h':  { interval: '60m', range: '60d' },
+  '1h':  { interval: '60m', range: '30d' },
+}
+
+async function fetchOilYahoo(timeframe: string): Promise<OHLCV[]> {
+  const { interval, range } = YAHOO_OIL_TF[timeframe]
+  const url  = `https://query1.finance.yahoo.com/v8/finance/chart/BZ=F?interval=${interval}&range=${range}`
+  const res  = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    next: { revalidate: 0 },
+  })
+  const json = await res.json()
+
+  const result = json?.chart?.result?.[0]
+  if (!result) throw new Error(`Yahoo Finance error for OIL ${timeframe}`)
+
+  const timestamps: number[]  = result.timestamp ?? []
+  const quote = result.indicators.quote[0]
+
+  const candles: OHLCV[] = timestamps
+    .map((_, i) => ({
+      open:   parseFloat(quote.open?.[i]  ?? 0),
+      high:   parseFloat(quote.high?.[i]  ?? 0),
+      low:    parseFloat(quote.low?.[i]   ?? 0),
+      close:  parseFloat(quote.close?.[i] ?? 0),
+      volume: parseFloat(quote.volume?.[i] ?? 0),
+    }))
+    .filter(c => c.close > 0)
+
+  return timeframe === '4h' ? aggregateTo4h(candles) : candles
+}
+
+// ─── Unified fetch ───────────────────────────────────────────────────────────
+export async function fetchCandles(asset: string, timeframe: string): Promise<OHLCV[]> {
+  if (BINANCE_SYMBOL[asset]) return fetchCandlesBinance(asset, timeframe)
+  if (asset === 'GOLD')       return fetchGoldAlphaVantage(timeframe)
+  if (asset === 'OIL')        return fetchOilYahoo(timeframe)
+  throw new Error(`Unknown asset: ${asset}`)
+}
+
+// ─── Live price ──────────────────────────────────────────────────────────────
 export async function fetchLivePrice(asset: string): Promise<number> {
-  // Crypto: use Binance ticker (free, real-time)
   if (BINANCE_SYMBOL[asset]) {
-    const symbol = BINANCE_SYMBOL[asset]
-    const res    = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { next: { revalidate: 30 } })
-    const json   = await res.json()
+    const res  = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${BINANCE_SYMBOL[asset]}`, { next: { revalidate: 30 } })
+    const json = await res.json()
     return parseFloat(json.price)
   }
 
-  // GOLD/OIL: use Twelve Data
-  const symbol = TWELVE_SYMBOL[asset]
-  const url    = `https://api.twelvedata.com/price?symbol=${symbol}&apikey=${TWELVE_KEY}`
-  const res    = await fetch(url, { next: { revalidate: 30 } })
-  const json   = await res.json()
-  return parseFloat(json.price)
+  if (asset === 'GOLD') {
+    const url  = `https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=XAU&to_currency=USD&apikey=${AV_KEY()}`
+    const res  = await fetch(url, { next: { revalidate: 60 } })
+    const json = await res.json()
+    return parseFloat(json['Realtime Currency Exchange Rate']?.['5. Exchange Rate'] ?? '0')
+  }
+
+  if (asset === 'OIL') {
+    const res  = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/BZ=F?interval=1d&range=5d', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      next: { revalidate: 60 },
+    })
+    const json = await res.json()
+    const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []
+    return closes.filter(Boolean).at(-1) ?? 0
+  }
+
+  return 0
 }
 
+// ─── Funding rate (crypto only, Binance) ─────────────────────────────────────
 export async function fetchFundingRate(asset: string): Promise<number | null> {
-  const symbolMap: Record<string, string> = {
-    BTC: 'BTCUSDT',
-    ETH: 'ETHUSDT',
-    SOL: 'SOLUSDT',
-  }
-  const symbol = symbolMap[asset]
+  const symbol = BINANCE_SYMBOL[asset] ? `${BINANCE_SYMBOL[asset].replace('USDT', '')}USDT` : null
   if (!symbol) return null
   try {
     const res  = await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`)

@@ -37,8 +37,8 @@ export async function GET(req: NextRequest) {
         console.error(`[scan] ${asset} ${tf}:`, e.message)
         results[asset][tf] = `ERROR: ${e.message}`
       }
-      // Twelve Data free plan: 8 req/min → wait between requests (only for GOLD/OIL)
-      if (asset === 'GOLD' || asset === 'OIL') await sleep(9000)
+      // Alpha Vantage free plan: 5 req/min → wait 13s between requests for GOLD
+      if (asset === 'GOLD') await sleep(13000)
     }
 
     // Detectar gatilhos
