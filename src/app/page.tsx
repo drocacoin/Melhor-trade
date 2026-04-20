@@ -1,65 +1,150 @@
-import Image from "next/image";
+import { supabaseAdmin } from '@/lib/supabase'
+import { AssetCard } from '@/components/dashboard/AssetCard'
+import { Asset } from '@/types'
 
-export default function Home() {
+const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'GOLD', 'OIL']
+
+export const revalidate = 300
+
+function cn(...classes: (string | false | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
+}
+
+function gradeColor(grade: string) {
+  const m: Record<string, string> = {
+    'A+': 'bg-emerald-500 text-white', 'A': 'bg-green-500 text-white',
+    'B': 'bg-yellow-500 text-black',   'C': 'bg-orange-500 text-white',
+  }
+  return m[grade] ?? 'bg-gray-600 text-white'
+}
+
+async function getData() {
+  const db = supabaseAdmin()
+  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }] =
+    await Promise.all([
+      db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(400),
+      db.from('trades').select('*').eq('status', 'open'),
+      db.from('signals').select('*').eq('status', 'active').order('detected_at', { ascending: false }).limit(10),
+      db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
+    ])
+  return { snaps: snaps ?? [], trades: trades ?? [], signals: signals ?? [], macro: macro?.[0] ?? null }
+}
+
+export default async function DashboardPage() {
+  const { snaps, trades, signals, macro } = await getData()
+
+  const seen = new Set<string>()
+  const latest = snaps.filter(s => {
+    const k = `${s.asset}-${s.timeframe}`
+    if (seen.has(k)) return false
+    seen.add(k); return true
+  })
+
+  const byAsset = Object.fromEntries(ASSETS.map(a => [a, latest.filter(s => s.asset === a)]))
+  const latestSignal = (a: Asset) => signals.find(s => s.asset === a)
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Swing Trade Desk · Scanner 4h</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="flex items-center gap-3">
+          {macro && (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm">
+              <span className="text-gray-500">Regime: </span>
+              <span className={cn('font-semibold',
+                macro.regime === 'risk-on' ? 'text-emerald-400' :
+                macro.regime === 'risk-off' ? 'text-red-400' : 'text-yellow-400'
+              )}>{(macro.regime as string).toUpperCase()}</span>
+              <span className="text-gray-500 ml-3">Macro: </span>
+              <span className={cn('font-bold',
+                macro.macro_score >= 1 ? 'text-emerald-400' :
+                macro.macro_score <= -1 ? 'text-red-400' : 'text-yellow-400'
+              )}>{macro.macro_score >= 0 ? '+' : ''}{macro.macro_score}</span>
+            </div>
+          )}
+          {trades.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm">
+              <span className="text-gray-500">Abertos: </span>
+              <span className="font-semibold">{trades.length}</span>
+            </div>
+          )}
         </div>
-      </main>
+      </div>
+
+      {/* Active signals banner */}
+      {signals.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Sinais ativos</p>
+          <div className="flex flex-wrap gap-2">
+            {signals.map(s => (
+              <div key={s.id} className="bg-gray-900 border border-emerald-500/30 rounded-lg px-3 py-2 text-sm flex items-center gap-2">
+                <span className={s.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}>
+                  {s.direction === 'long' ? '▲' : '▼'}
+                </span>
+                <span className="font-semibold">{s.asset}</span>
+                <span className={cn('text-xs px-1.5 py-0.5 rounded font-bold', gradeColor(s.setup_grade))}>
+                  {s.setup_grade}
+                </span>
+                <span className="text-gray-500 text-xs">RR {s.rr1}:1</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Asset cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {ASSETS.map(asset => (
+          <AssetCard
+            key={asset}
+            asset={asset}
+            snapshots={byAsset[asset] ?? []}
+            setupGrade={latestSignal(asset)?.setup_grade}
+            macroScore={macro?.macro_score}
+          />
+        ))}
+      </div>
+
+      {/* Open trades table */}
+      {trades.length > 0 && (
+        <div className="mt-8">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Trades abertos</p>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
+                  {['Ativo','Direção','Entrada','Stop','Alvo 1','Alavancagem','Grade'].map(h => (
+                    <th key={h} className="text-left px-4 py-3">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t: any) => (
+                  <tr key={t.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                    <td className="px-4 py-3 font-semibold">{t.asset}</td>
+                    <td className="px-4 py-3">
+                      <span className={t.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}>
+                        {(t.direction as string).toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono">${t.entry_price?.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-mono text-red-400">${t.stop_price?.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-mono text-emerald-400">${t.target1?.toLocaleString() ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-400">{t.leverage}x</td>
+                    <td className="px-4 py-3">
+                      {t.setup_grade && <span className={cn('text-xs px-1.5 py-0.5 rounded font-bold', gradeColor(t.setup_grade))}>{t.setup_grade}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }
