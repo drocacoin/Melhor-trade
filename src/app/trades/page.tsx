@@ -94,6 +94,21 @@ export default function TradesPage() {
     setEditStop(null); setLoading(false); load()
   }
 
+  const [calc, setCalc] = useState({ capital: '', risk: '1', entry: '', stop: '' })
+
+  const calcResult = (() => {
+    const capital = parseFloat(calc.capital)
+    const risk    = parseFloat(calc.risk)
+    const entry   = parseFloat(calc.entry)
+    const stop    = parseFloat(calc.stop)
+    if (!capital || !risk || !entry || !stop || entry === stop) return null
+    const riskUsd    = capital * (risk / 100)
+    const distPct    = Math.abs((entry - stop) / entry) * 100
+    const positionUsd = riskUsd / (distPct / 100)
+    const contracts   = positionUsd / entry
+    return { riskUsd, distPct, positionUsd, contracts }
+  })()
+
   const open        = trades.filter(t => t.status === 'open')
   const closed      = trades.filter(t => t.status === 'closed')
   const totalPnl    = closed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0)
@@ -213,6 +228,51 @@ export default function TradesPage() {
           </div>
         </form>
       )}
+
+      {/* Calculadora de risco */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">🧮 Calculadora de risco</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          {[
+            { key: 'capital', label: 'Capital total ($)',  placeholder: '10000' },
+            { key: 'risk',    label: 'Risco por trade (%)', placeholder: '1'    },
+            { key: 'entry',   label: 'Preço de entrada',   placeholder: '95000' },
+            { key: 'stop',    label: 'Preço de stop',      placeholder: '92000' },
+          ].map(({ key, label, placeholder }) => (
+            <label key={key} className="flex flex-col gap-1 text-xs text-gray-400">
+              {label}
+              <input
+                type="number" step="any" placeholder={placeholder}
+                value={(calc as any)[key]}
+                onChange={e => setCalc(c => ({ ...c, [key]: e.target.value }))}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-100"
+              />
+            </label>
+          ))}
+        </div>
+        {calcResult ? (
+          <div className="flex flex-wrap gap-6 bg-gray-800 rounded-lg px-4 py-3 text-sm">
+            <div>
+              <span className="text-xs text-gray-500">Risco em USD </span>
+              <span className="font-bold text-red-400">${calcResult.riskUsd.toFixed(2)}</span>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500">Distância ao stop </span>
+              <span className="font-mono text-yellow-400">{calcResult.distPct.toFixed(2)}%</span>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500">Tamanho da posição </span>
+              <span className="font-bold text-emerald-400">${calcResult.positionUsd.toFixed(2)}</span>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500">Quantidade </span>
+              <span className="font-mono text-gray-200">{calcResult.contracts.toFixed(4)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-600 italic">Preencha os 4 campos para calcular o tamanho da posição.</p>
+        )}
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-4 border-b border-gray-800 mb-4">

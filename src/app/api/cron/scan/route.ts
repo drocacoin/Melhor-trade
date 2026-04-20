@@ -43,6 +43,13 @@ export async function GET(req: NextRequest) {
   const thresholds: Record<string, ReturnType<typeof computeThreshold>> = {}
   for (const asset of ASSETS) thresholds[asset] = computeThreshold(perfMap[asset])
 
+  // ── Expirar sinais com mais de 3 dias sem ser acionados ──────────────────
+  const expiryCutoff = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()
+  await db.from('signals')
+    .update({ status: 'expired' })
+    .eq('status', 'active')
+    .lt('detected_at', expiryCutoff)
+
   // ── Scan ──────────────────────────────────────────────────────────────────
   const results: Record<string, any> = {}
   const biases:  Record<string, string> = {}
@@ -74,7 +81,7 @@ export async function GET(req: NextRequest) {
     // ── Detectar sinal com pesos dinâmicos ────────────────────────────────
     const { threshold } = thresholds[asset]
     const weights = await loadWeights(asset)
-    const signal  = detectSignal(asset, snapshots, fg, threshold, weights)
+    const signal  = detectSignal(asset, snapshots, fg, threshold, weights, latestMacro)
 
     if (signal) {
       // Enriquecer com contexto
@@ -132,6 +139,7 @@ function detectSignal(
   fg:       { value: number; label: string } | null,
   minScore: number,
   weights:  Awaited<ReturnType<typeof loadWeights>>,
+  macro:    any,
 ) {
   const d  = snaps['1d']
   const h4 = snaps['4h']
@@ -155,6 +163,17 @@ function detectSignal(
   if (d.bias === 'BAIXISTA')                              bearScore += weights.daily_bias
   if (wk?.bias === 'BAIXISTA')                            bearScore += weights.weekly_bias
 
+  // ── Ajuste macro: risk-on favorece longs, risk-off favorece shorts ────────
+  // macro_score vai de -2 a +2:
+  //   +2 → bullScore +1, bearScore -1  (ambiente muito favorável para longs)
+  //   -2 → bullScore -1, bearScore +1  (ambiente muito favorável para shorts)
+  if (macro?.macro_score != null) {
+    const ms = macro.macro_score as number
+    bullScore += ms * 0.5
+    bearScore -= ms * 0.5
+  }
+
+  // ── Fear & Greed extremo penaliza a direção da euforia/pânico ─────────────
   if (fg) {
     if (fg.value >= 80) bullScore -= 1
     if (fg.value <= 20) bearScore -= 1
@@ -181,7 +200,8 @@ function detectSignal(
   const entryHigh  = isLong ? close * 1.002 : close * 1.005
 
   return {
-    asset, direction, setup_grade: grade, macro_score: 0,
+    asset, direction, setup_grade: grade,
+    macro_score: macro?.macro_score ?? 0,
     entry_zone_low:  Math.round(entryLow  * 100) / 100,
     entry_zone_high: Math.round(entryHigh * 100) / 100,
     stop:    Math.round(stop    * 100) / 100,
