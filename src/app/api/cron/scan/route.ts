@@ -4,6 +4,7 @@ import { computeSnapshot } from '@/lib/indicators'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary, fmtStopAlert } from '@/lib/telegram'
 import { computeThreshold } from '@/lib/threshold'
+import { generateSignalAnalysis } from '@/lib/signal-analysis'
 import { Asset } from '@/types'
 
 const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'GOLD', 'OIL']
@@ -22,11 +23,13 @@ export async function GET(req: NextRequest) {
   const db = supabaseAdmin()
 
   // ── Fetch contexto global em paralelo ─────────────────────────────────────
-  const [fg, fundings, { data: perfRows }] = await Promise.all([
+  const [fg, fundings, { data: perfRows }, { data: macroRow }] = await Promise.all([
     fetchFearAndGreed(),
     Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]))),
     db.from('performance_summary').select('*'),
+    db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
   ])
+  const latestMacro = macroRow?.[0] ?? null
 
   const fundingMap = Object.fromEntries(fundings)
 
@@ -74,8 +77,18 @@ export async function GET(req: NextRequest) {
       const { data } = await db.from('signals').insert(signal).select().single()
       if (data) {
         newSignals++
-        await sendTelegram(fmtSignal(data, fg, fundingMap[asset] ?? null))
-        results[asset].signal = data
+
+        // Auto-análise Haiku (rápida) — enviada direto no Telegram
+        let analysis = ''
+        try {
+          analysis = await generateSignalAnalysis(data, snapshots, latestMacro, fg, 'haiku')
+          await db.from('signals').update({ analysis }).eq('id', data.id)
+        } catch (e: any) {
+          console.error(`[scan] análise falhou para ${asset}:`, e.message)
+        }
+
+        await sendTelegram(fmtSignal({ ...data, analysis }, fg, fundingMap[asset] ?? null))
+        results[asset].signal = { ...data, analysis }
       }
     }
 

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { AssetCard } from '@/components/dashboard/AssetCard'
+import { LiveScores } from '@/components/dashboard/LiveScores'
 import { computeThreshold } from '@/lib/threshold'
 import { Asset } from '@/types'
 
@@ -107,6 +108,9 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Score ao vivo — componente cliente com auto-refresh */}
+      <LiveScores />
 
       {/* Threshold dinâmico por ativo */}
       <div className="mb-6">

@@ -57,9 +57,18 @@ export function fmtSignal(
     '',
     `⚡ <i>${signal.trigger}</i>`,
     `❌ Cancela: <i>${signal.cancellation}</i>`,
-    '',
-    `👉 Abrir app → Alertas → ${signal.asset}`,
   )
+
+  // Análise IA — incluída se disponível (auto-gerada pelo Haiku no scan)
+  if (signal.analysis) {
+    // Limpa markdown e trunca para caber no Telegram (4096 chars total)
+    const cleanAnalysis = signal.analysis
+      .replace(/\*\*/g, '<b>').replace(/\*\*/g, '</b>')
+      .slice(0, 900)
+    lines.push('', `✦ <b>Análise Rápida IA</b>`, cleanAnalysis)
+  }
+
+  lines.push('', `👉 Abrir app → Alertas → ${signal.asset}`)
 
   return lines.join('\n')
 }
