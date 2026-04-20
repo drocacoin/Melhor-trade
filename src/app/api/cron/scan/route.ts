@@ -23,9 +23,13 @@ export async function GET(req: NextRequest) {
     for (const tf of TIMEFRAMES) {
       try {
         const candles = await fetchCandles(asset, tf)
-        if (candles.length < 60) continue
+        if (candles.length < 60) {
+          results[asset][tf] = `only ${candles.length} candles`
+          continue
+        }
         const snap = computeSnapshot(candles)
         snapshots[tf] = snap
+        results[asset][tf] = { close: snap.close, bias: snap.bias }
 
         await db.from('snapshots').insert({
           asset,
@@ -34,6 +38,7 @@ export async function GET(req: NextRequest) {
         })
       } catch (e: any) {
         console.error(`[scan] ${asset} ${tf}:`, e.message)
+        results[asset][tf] = `ERROR: ${e.message}`
       }
     }
 

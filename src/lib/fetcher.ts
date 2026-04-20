@@ -14,7 +14,7 @@ const SYMBOL_MAP: Record<string, string> = {
   ETH:  'ETH/USD',
   SOL:  'SOL/USD',
   GOLD: 'XAU/USD',
-  OIL:  'BZ=F',
+  OIL:  'BCO/USD',
 }
 
 const OUTPUT_SIZE: Record<string, number> = {
