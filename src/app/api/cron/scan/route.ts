@@ -7,6 +7,8 @@ import { Asset } from '@/types'
 const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'GOLD', 'OIL']
 const TIMEFRAMES = ['1wk', '1d', '4h', '1h']
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
   if (secret !== process.env.CRON_SECRET) {
@@ -25,21 +27,18 @@ export async function GET(req: NextRequest) {
         const candles = await fetchCandles(asset, tf)
         if (candles.length < 60) {
           results[asset][tf] = `only ${candles.length} candles`
-          continue
+        } else {
+          const snap = computeSnapshot(candles)
+          snapshots[tf] = snap
+          results[asset][tf] = { close: snap.close, bias: snap.bias }
+          await db.from('snapshots').insert({ asset, timeframe: tf, ...snap })
         }
-        const snap = computeSnapshot(candles)
-        snapshots[tf] = snap
-        results[asset][tf] = { close: snap.close, bias: snap.bias }
-
-        await db.from('snapshots').insert({
-          asset,
-          timeframe: tf,
-          ...snap,
-        })
       } catch (e: any) {
         console.error(`[scan] ${asset} ${tf}:`, e.message)
         results[asset][tf] = `ERROR: ${e.message}`
       }
+      // Twelve Data free plan: 8 req/min → wait 8s between requests
+      await sleep(8000)
     }
 
     // Detectar gatilhos
