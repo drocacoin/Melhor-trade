@@ -133,16 +133,16 @@ export const CORRELATION_GROUPS: Record<string, Asset[]> = {
 }
 
 export const ASSET_SYMBOLS: Record<Asset, string> = {
-  BTC:  'BTC-USD',  ETH:   'ETH-USD',  SOL:  'SOL-USD',
-  HYPE: 'HYPE-USD', AAVE:  'AAVE-USD', LINK: 'LINK-USD', AVAX: 'AVAX-USD',
-  GOLD: 'GC=F',     OIL:   'BZ=F',
+  BTC:  'BTCUSDT',  ETH:   'ETHUSDT',  SOL:  'SOLUSDT',
+  HYPE: 'HYPEUSDT', AAVE:  'AAVEUSDT', LINK: 'LINKUSDT', AVAX: 'AVAXUSDT',
+  GOLD: 'XAUTUSDT', OIL:   'OILUSDT',
   SP500: 'SPY',     MSTR:  'MSTR',
 }
 
 export const ASSET_LABELS: Record<Asset, string> = {
   BTC:  'Bitcoin',     ETH:  'Ethereum',  SOL:  'Solana',
   HYPE: 'Hyperliquid', AAVE: 'Aave',      LINK: 'Chainlink', AVAX: 'Avalanche',
-  GOLD: 'Ouro',        OIL:  'Petróleo Brent',
+  GOLD: 'Ouro (XAUT)', OIL:  'Petróleo Brent',
   SP500: 'S&P 500 (SPY)', MSTR: 'MicroStrategy',
 }
 

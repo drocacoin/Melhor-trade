@@ -1,55 +1,54 @@
 import { OHLCV } from './indicators'
 
-// ─── Kraken (BTC, ETH, SOL) — free, no key, no geo restrictions ─────────────
-const KRAKEN_PAIR: Record<string, string> = {
-  BTC:  'XBTUSD',
-  ETH:  'ETHUSD',
-  SOL:  'SOLUSD',
-  HYPE: 'HYPEUSD',
-  AAVE: 'AAVEUSD',
-  LINK: 'LINKUSD',
-  AVAX: 'AVAXUSD',
+// ─── MEXC (crypto + tokenized commodities) — free, no key ────────────────────
+// Covers: BTC, ETH, SOL, HYPE, AAVE, LINK, AVAX, GOLD (XAUT), OIL (Brent)
+const MEXC_SYMBOL: Record<string, string> = {
+  BTC:  'BTCUSDT',
+  ETH:  'ETHUSDT',
+  SOL:  'SOLUSDT',
+  HYPE: 'HYPEUSDT',
+  AAVE: 'AAVEUSDT',
+  LINK: 'LINKUSDT',
+  AVAX: 'AVAXUSDT',
+  GOLD: 'XAUTUSDT',  // Tether Gold — tokenized gold price
+  OIL:  'OILUSDT',   // Tokenized Brent crude
 }
 
-const KRAKEN_INTERVAL: Record<string, number> = {
-  '1wk': 10080,
-  '1d':  1440,
-  '4h':  240,
-  '1h':  60,
+const MEXC_INTERVAL: Record<string, string> = {
+  '1wk': '1W',
+  '1d':  '1d',
+  '4h':  '4h',
+  '1h':  '60m',
 }
 
-async function fetchCandlesKraken(asset: string, timeframe: string): Promise<OHLCV[]> {
-  const pair     = KRAKEN_PAIR[asset]
-  const interval = KRAKEN_INTERVAL[timeframe]
+async function fetchCandlesMexc(asset: string, timeframe: string): Promise<OHLCV[]> {
+  const symbol   = MEXC_SYMBOL[asset]
+  const interval = MEXC_INTERVAL[timeframe]
+  const limit    = 200
 
-  const url  = `https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${interval}`
-  const res  = await fetch(url, { next: { revalidate: 0 } })
-  const json = await res.json()
+  const url  = `https://api.mexc.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+  const res  = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    next: { revalidate: 0 },
+  })
+  const json: any[][] = await res.json()
 
-  if (json.error?.length) {
-    throw new Error(`Kraken error for ${asset} ${timeframe}: ${json.error.join(', ')}`)
-  }
+  if (!Array.isArray(json)) throw new Error(`MEXC error for ${asset} ${timeframe}`)
 
-  // Result key varies (e.g. XXBTZUSD) — just take first key that isn't 'last'
-  const resultKey = Object.keys(json.result).find(k => k !== 'last')!
-  const rows: any[][] = json.result[resultKey]
-
-  // [time, open, high, low, close, vwap, volume, count]
-  return rows.map(r => ({
+  // [openTime, open, high, low, close, volume, closeTime, quoteVolume, ...]
+  return json.map(r => ({
     open:   parseFloat(r[1]),
     high:   parseFloat(r[2]),
     low:    parseFloat(r[3]),
     close:  parseFloat(r[4]),
-    volume: parseFloat(r[6]),
+    volume: parseFloat(r[5]),
   }))
 }
 
-// ─── Yahoo Finance (GOLD via GC=F, OIL via BZ=F) — free, no key ─────────────
+// ─── Yahoo Finance (SP500 via SPY, MSTR) — free, no key ──────────────────────
 const YAHOO_SYMBOL: Record<string, string> = {
-  GOLD:  'GC=F',
-  OIL:   'BZ=F',
-  SP500: 'SPY',   // ETF do S&P 500 — dados completos incluindo volume
-  MSTR:  'MSTR',  // MicroStrategy — alavancagem ao BTC via ações
+  SP500: 'SPY',   // S&P 500 ETF — full OHLCV data
+  MSTR:  'MSTR',  // MicroStrategy — BTC-leveraged equity
 }
 
 const YAHOO_TF: Record<string, { interval: string; range: string }> = {
@@ -75,7 +74,7 @@ function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
 }
 
 async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLCV[]> {
-  const symbol            = YAHOO_SYMBOL[asset]
+  const symbol              = YAHOO_SYMBOL[asset]
   const { interval, range } = YAHOO_TF[timeframe]
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`
@@ -104,39 +103,51 @@ async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLC
   return timeframe === '4h' ? aggregateTo4h(candles) : candles
 }
 
-// ─── Unified fetch ────────────────────────────────────────────────────────────
+// ─── Unified candle fetch ─────────────────────────────────────────────────────
 export async function fetchCandles(asset: string, timeframe: string): Promise<OHLCV[]> {
-  if (KRAKEN_PAIR[asset])   return fetchCandlesKraken(asset, timeframe)
-  if (YAHOO_SYMBOL[asset])  return fetchCandlesYahoo(asset, timeframe)
+  if (MEXC_SYMBOL[asset])  return fetchCandlesMexc(asset, timeframe)
+  if (YAHOO_SYMBOL[asset]) return fetchCandlesYahoo(asset, timeframe)
   throw new Error(`Unknown asset: ${asset}`)
 }
 
 // ─── Live price ───────────────────────────────────────────────────────────────
 export async function fetchLivePrice(asset: string): Promise<number> {
-  if (KRAKEN_PAIR[asset]) {
-    const pair = KRAKEN_PAIR[asset]
-    const res  = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { next: { revalidate: 30 } })
-    const json = await res.json()
-    const key  = Object.keys(json.result)[0]
-    return parseFloat(json.result[key]?.c?.[0] ?? '0')
+  // MEXC — crypto + tokenized commodities
+  if (MEXC_SYMBOL[asset]) {
+    const symbol = MEXC_SYMBOL[asset]
+    try {
+      const res  = await fetch(
+        `https://api.mexc.com/api/v3/ticker/price?symbol=${symbol}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' }, next: { revalidate: 30 } }
+      )
+      const json = await res.json()
+      return json?.price ? parseFloat(json.price) : 0
+    } catch {
+      return 0
+    }
   }
 
+  // Yahoo Finance — equities (SP500, MSTR)
   if (YAHOO_SYMBOL[asset]) {
     const symbol = YAHOO_SYMBOL[asset]
-    const res    = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' }, next: { revalidate: 60 } }
-    )
-    const json   = await res.json()
-    const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []
-    return closes.filter(Boolean).at(-1) ?? 0
+    try {
+      const res  = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' }, next: { revalidate: 60 } }
+      )
+      const json   = await res.json()
+      const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []
+      return (closes as (number | null)[]).filter(Boolean).at(-1) ?? 0
+    } catch {
+      return 0
+    }
   }
 
   return 0
 }
 
-// ─── Funding rate via Bybit (BTC/ETH/SOL — free, no key, no geo block) ───────
-const BYBIT_SYMBOL: Record<string, string> = {
+// ─── Funding rate via Bybit (crypto perpetuals) — free, no key ───────────────
+const BYBIT_FUNDING_SYMBOL: Record<string, string> = {
   BTC:  'BTCUSDT',
   ETH:  'ETHUSDT',
   SOL:  'SOLUSDT',
@@ -147,7 +158,7 @@ const BYBIT_SYMBOL: Record<string, string> = {
 }
 
 export async function fetchFundingRate(asset: string): Promise<number | null> {
-  const symbol = BYBIT_SYMBOL[asset]
+  const symbol = BYBIT_FUNDING_SYMBOL[asset]
   if (!symbol) return null
 
   try {

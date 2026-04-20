@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { AssetCard } from '@/components/dashboard/AssetCard'
 import { LiveScores } from '@/components/dashboard/LiveScores'
 import { computeThreshold } from '@/lib/threshold'
+import { fetchLivePrice } from '@/lib/fetcher'
 import { Asset } from '@/types'
 
 const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
@@ -22,13 +23,16 @@ function gradeColor(grade: string) {
 
 async function getData() {
   const db = supabaseAdmin()
-  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }, { data: perf }] =
+  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }, { data: perf }, prices] =
     await Promise.all([
       db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(400),
       db.from('trades').select('*').eq('status', 'open'),
       db.from('signals').select('*').eq('status', 'active').order('detected_at', { ascending: false }).limit(10),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
       db.from('performance_summary').select('*'),
+      Promise.all(
+        ASSETS.map(a => fetchLivePrice(a).then(p => [a, p] as const).catch(() => [a, 0] as const))
+      ).then(entries => Object.fromEntries(entries) as Record<string, number>),
     ])
   return {
     snaps:   snaps   ?? [],
@@ -36,11 +40,12 @@ async function getData() {
     signals: signals ?? [],
     macro:   macro?.[0] ?? null,
     perf:    perf    ?? [],
+    prices,
   }
 }
 
 export default async function DashboardPage() {
-  const { snaps, trades, signals, macro, perf } = await getData()
+  const { snaps, trades, signals, macro, perf, prices } = await getData()
 
   const seen = new Set<string>()
   const latest = snaps.filter(s => {
@@ -144,6 +149,7 @@ export default async function DashboardPage() {
             key={asset}
             asset={asset}
             snapshots={byAsset[asset] ?? []}
+            livePrice={prices[asset] || undefined}
             setupGrade={latestSignal(asset)?.setup_grade}
             macroScore={macro?.macro_score}
           />
