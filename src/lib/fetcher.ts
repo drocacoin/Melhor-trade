@@ -10,8 +10,8 @@ const MEXC_SYMBOL: Record<string, string> = {
   AAVE: 'AAVEUSDT',
   LINK: 'LINKUSDT',
   AVAX: 'AVAXUSDT',
-  GOLD: 'XAUTUSDT',  // Tether Gold — tokenized gold price
-  OIL:  'OILUSDT',   // Tokenized Brent crude
+  GOLD: 'GOLD(XAUT)USDT',   // Tether Gold — tokenized gold (MEXC symbol with parens)
+  OIL:  'OIL(USOON)USDT',   // Tokenized Brent crude on MEXC
 }
 
 const MEXC_INTERVAL: Record<string, string> = {
@@ -26,7 +26,7 @@ async function fetchCandlesMexc(asset: string, timeframe: string): Promise<OHLCV
   const interval = MEXC_INTERVAL[timeframe]
   const limit    = 200
 
-  const url  = `https://api.mexc.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+  const url  = `https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`
   const res  = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     next: { revalidate: 0 },
@@ -117,7 +117,7 @@ export async function fetchLivePrice(asset: string): Promise<number> {
     const symbol = MEXC_SYMBOL[asset]
     try {
       const res  = await fetch(
-        `https://api.mexc.com/api/v3/ticker/price?symbol=${symbol}`,
+        `https://api.mexc.com/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`,
         { headers: { 'User-Agent': 'Mozilla/5.0' }, next: { revalidate: 30 } }
       )
       const json = await res.json()
