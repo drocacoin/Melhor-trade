@@ -5,10 +5,10 @@ const KRAKEN_PAIR: Record<string, string> = {
   BTC:  'XBTUSD',
   ETH:  'ETHUSD',
   SOL:  'SOLUSD',
-  AVAX: 'AVAXUSD',
+  HYPE: 'HYPEUSD',
+  AAVE: 'AAVEUSD',
   LINK: 'LINKUSD',
-  ADA:  'ADAUSD',
-  DOT:  'DOTUSD',
+  AVAX: 'AVAXUSD',
 }
 
 const KRAKEN_INTERVAL: Record<string, number> = {
@@ -138,10 +138,10 @@ const BYBIT_SYMBOL: Record<string, string> = {
   BTC:  'BTCUSDT',
   ETH:  'ETHUSDT',
   SOL:  'SOLUSDT',
-  AVAX: 'AVAXUSDT',
+  HYPE: 'HYPEUSDT',
+  AAVE: 'AAVEUSDT',
   LINK: 'LINKUSDT',
-  ADA:  'ADAUSDT',
-  DOT:  'DOTUSDT',
+  AVAX: 'AVAXUSDT',
 }
 
 export async function fetchFundingRate(asset: string): Promise<number | null> {
