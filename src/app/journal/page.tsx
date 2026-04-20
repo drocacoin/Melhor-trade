@@ -61,7 +61,7 @@ export default function JournalPage() {
     </div>
   )
 
-  const { summary, equity, monthly, errors, perf } = data
+  const { summary, equity, monthly, errors, perf, avgScores, processMap, rules } = data
 
   return (
     <div>
@@ -171,6 +171,55 @@ export default function JournalPage() {
           </div>
         )}
       </div>
+
+      {/* AI Review Scores */}
+      {avgScores?.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-semibold text-gray-400">✦ Scores médios (Review IA)</p>
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              {processMap && Object.entries(processMap).map(([cls, n]: any) => (
+                <span key={cls} className={cn(
+                  'px-2 py-0.5 rounded font-medium',
+                  cls === 'correto' ? 'bg-emerald-500/20 text-emerald-400' :
+                  cls === 'incorreto' ? 'bg-red-500/20 text-red-400' :
+                  'bg-yellow-500/20 text-yellow-400'
+                )}>{cls.replace('_', ' ')}: {n}</span>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+            {avgScores.map((s: any) => {
+              const color = s.score >= 7 ? 'text-emerald-400' : s.score >= 5 ? 'text-yellow-400' : 'text-red-400'
+              const bg    = s.score >= 7 ? 'bg-emerald-500' : s.score >= 5 ? 'bg-yellow-500' : 'bg-red-500'
+              return (
+                <div key={s.dimension} className="bg-gray-800 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-500 capitalize mb-2">{s.dimension}</p>
+                  <p className={cn('text-2xl font-bold font-mono', color)}>{s.score}</p>
+                  <div className="mt-2 h-1 bg-gray-700 rounded-full overflow-hidden">
+                    <div className={cn('h-full rounded-full', bg)} style={{ width: `${s.score * 10}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Regras geradas pela IA */}
+      {rules?.length > 0 && (
+        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-5 mb-6">
+          <p className="text-sm font-semibold text-blue-400 mb-3">✦ Regras derivadas dos seus trades (IA)</p>
+          <div className="space-y-2">
+            {rules.map((r: any, i: number) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <span className="text-blue-500 mt-0.5 shrink-0">→</span>
+                <p className="text-gray-300">{r.rule}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Performance por ativo */}

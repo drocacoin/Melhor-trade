@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { autoReview } from '@/lib/auto-review'
+import { sendTelegram } from '@/lib/telegram'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -23,5 +26,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // ── Background tasks (after response is sent) ─────────────────────────────
+  after(async () => {
+    // 1. Auto-review com IA
+    await autoReview(data.id)
+
+    // 2. Notificação Telegram
+    const pnlSign  = (pnl_usd ?? 0) >= 0 ? '+' : ''
+    const emoji    = (pnl_usd ?? 0) >= 0 ? '✅' : '❌'
+    const pctSign  = pnl_pct >= 0 ? '+' : ''
+
+    await sendTelegram(
+      `${emoji} <b>Trade fechado — ${trade.asset}</b>\n` +
+      `Direção: ${trade.direction.toUpperCase()}\n` +
+      `Entrada: <code>$${trade.entry_price}</code> → Fechamento: <code>$${close_price}</code>\n` +
+      `P&amp;L: <b>${pnlSign}$${Math.abs(pnl_usd ?? 0).toFixed(2)}</b> (${pctSign}${pnl_pct.toFixed(2)}%)\n` +
+      `\n🤖 Analisando trade automaticamente...`
+    )
+  })
+
   return NextResponse.json(data)
 }
