@@ -11,7 +11,7 @@ const MEXC_SYMBOL: Record<string, string> = {
   LINK: 'LINKUSDT',
   AVAX: 'AVAXUSDT',
   GOLD: 'GOLD(XAUT)USDT',   // Tether Gold — tokenized gold (MEXC symbol with parens)
-  OIL:  'OIL(USOON)USDT',   // Tokenized Brent crude on MEXC
+  OIL:  'OIL(BRENT)USDT',   // Brent crude futures tokenizado na MEXC
 }
 
 const MEXC_INTERVAL: Record<string, string> = {
