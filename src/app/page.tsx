@@ -4,7 +4,7 @@ import { LiveScores } from '@/components/dashboard/LiveScores'
 import { computeThreshold } from '@/lib/threshold'
 import { Asset } from '@/types'
 
-const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'GOLD', 'OIL']
+const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
 
 export const revalidate = 300
 
