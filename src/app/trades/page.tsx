@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Trade, Asset, Direction, SetupGrade } from '@/types'
 import { fmtPrice, fmtPct, cn, gradeColor, pnlColor } from '@/lib/utils'
+import { EquityCurve } from '@/components/dashboard/EquityCurve'
 
 const ASSETS: Asset[]      = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
 const GRADES: SetupGrade[] = ['A+', 'A', 'B', 'C']
@@ -402,8 +403,10 @@ export default function TradesPage() {
         </div>
       )}
 
-      {/* Closed trades table */}
+      {/* Closed trades */}
       {tab === 'closed' && (
+        <>
+        <EquityCurve trades={closed} />
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -444,6 +447,7 @@ export default function TradesPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Edit stop modal */}
