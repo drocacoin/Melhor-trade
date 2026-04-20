@@ -46,8 +46,10 @@ async function fetchCandlesKraken(asset: string, timeframe: string): Promise<OHL
 
 // ─── Yahoo Finance (GOLD via GC=F, OIL via BZ=F) — free, no key ─────────────
 const YAHOO_SYMBOL: Record<string, string> = {
-  GOLD: 'GC=F',
-  OIL:  'BZ=F',
+  GOLD:  'GC=F',
+  OIL:   'BZ=F',
+  SP500: 'SPY',   // ETF do S&P 500 — dados completos incluindo volume
+  MSTR:  'MSTR',  // MicroStrategy — alavancagem ao BTC via ações
 }
 
 const YAHOO_TF: Record<string, { interval: string; range: string }> = {
