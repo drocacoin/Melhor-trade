@@ -37,8 +37,8 @@ export async function GET(req: NextRequest) {
         console.error(`[scan] ${asset} ${tf}:`, e.message)
         results[asset][tf] = `ERROR: ${e.message}`
       }
-      // Alpha Vantage free plan: 5 req/min → wait 13s between requests for GOLD
-      if (asset === 'GOLD') await sleep(13000)
+      // small delay to avoid hammering APIs
+      await sleep(500)
     }
 
     // Detectar gatilhos
