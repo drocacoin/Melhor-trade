@@ -31,7 +31,8 @@ const MIN_WEIGHT = 0.5   // nenhum fator some completamente
 const MAX_WEIGHT = 2.0   // nenhum fator domina demais
 
 export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
+  const bearer = req.headers.get('authorization')?.replace('Bearer ', '')
+  const secret = bearer ?? req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

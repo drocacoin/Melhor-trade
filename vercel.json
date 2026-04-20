@@ -1,19 +1,19 @@
 {
   "crons": [
     {
-      "path": "/api/cron/scan?secret=mt2026xk9&send_summary=true",
+      "path": "/api/cron/scan?send_summary=true",
       "schedule": "0 9 * * *"
     },
     {
-      "path": "/api/cron/scan?secret=mt2026xk9",
+      "path": "/api/cron/scan",
       "schedule": "0 1,5,13,17,21 * * *"
     },
     {
-      "path": "/api/cron/digest?secret=mt2026xk9",
+      "path": "/api/cron/digest",
       "schedule": "0 11 * * 0"
     },
     {
-      "path": "/api/cron/evolve?secret=mt2026xk9",
+      "path": "/api/cron/evolve",
       "schedule": "0 10 * * 0"
     }
   ]
