@@ -1,4 +1,4 @@
-export type Asset = 'BTC' | 'ETH' | 'SOL' | 'GOLD' | 'OIL'
+export type Asset = 'BTC' | 'ETH' | 'SOL' | 'AVAX' | 'LINK' | 'ADA' | 'DOT' | 'GOLD' | 'OIL'
 export type Timeframe = 'macro' | 'trend' | 'execution' | 'refinement'
 export type Direction = 'long' | 'short'
 export type SetupGrade = 'A+' | 'A' | 'B' | 'C' | 'invalid'
@@ -125,26 +125,26 @@ export interface PerformanceSummary {
   avg_pnl_pct: number
 }
 
+// Grupos de correlação — alertamos quando há posições abertas no mesmo grupo
+export const CORRELATION_GROUPS: Record<string, Asset[]> = {
+  crypto:      ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'ADA', 'DOT'],
+  commodities: ['GOLD', 'OIL'],
+}
+
 export const ASSET_SYMBOLS: Record<Asset, string> = {
-  BTC:  'BTC-USD',
-  ETH:  'ETH-USD',
-  SOL:  'SOL-USD',
-  GOLD: 'GC=F',
-  OIL:  'BZ=F',
+  BTC:  'BTC-USD',  ETH:  'ETH-USD',  SOL:  'SOL-USD',
+  AVAX: 'AVAX-USD', LINK: 'LINK-USD', ADA:  'ADA-USD', DOT: 'DOT-USD',
+  GOLD: 'GC=F',     OIL:  'BZ=F',
 }
 
 export const ASSET_LABELS: Record<Asset, string> = {
-  BTC:  'Bitcoin',
-  ETH:  'Ethereum',
-  SOL:  'Solana',
-  GOLD: 'Ouro',
-  OIL:  'Petróleo Brent',
+  BTC:  'Bitcoin',    ETH:  'Ethereum',  SOL:  'Solana',
+  AVAX: 'Avalanche', LINK: 'Chainlink', ADA:  'Cardano', DOT: 'Polkadot',
+  GOLD: 'Ouro',       OIL:  'Petróleo Brent',
 }
 
 export const ASSET_COLORS: Record<Asset, string> = {
-  BTC:  '#F7931A',
-  ETH:  '#627EEA',
-  SOL:  '#9945FF',
-  GOLD: '#FFD700',
-  OIL:  '#8B4513',
+  BTC:  '#F7931A', ETH:  '#627EEA', SOL:  '#9945FF',
+  AVAX: '#E84142', LINK: '#2A5ADA', ADA:  '#0033AD', DOT: '#E6007A',
+  GOLD: '#FFD700', OIL:  '#8B4513',
 }

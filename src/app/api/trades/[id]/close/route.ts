@@ -32,6 +32,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // 1. Auto-review com IA
     await autoReview(data.id)
 
+    // 2. Verificar se atingiu múltiplo de 5 trades — dispara evolução
+    const db2 = supabaseAdmin()
+    const { count } = await db2.from('trades').select('*', { count: 'exact', head: true }).eq('status', 'closed')
+    if (count && count % 5 === 0) {
+      try {
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'}/api/cron/evolve?secret=${process.env.CRON_SECRET}`)
+      } catch { /* silencioso */ }
+    }
+
     // 2. Notificação Telegram
     const pnlSign  = (pnl_usd ?? 0) >= 0 ? '+' : ''
     const emoji    = (pnl_usd ?? 0) >= 0 ? '✅' : '❌'

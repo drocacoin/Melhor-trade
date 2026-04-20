@@ -23,9 +23,9 @@ export async function sendTelegram(text: string): Promise<boolean> {
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
 export function fmtSignal(
-  signal: any,
-  fg: { value: number; label: string } | null,
-  funding: number | null
+  signal:  any,
+  fg:      { value: number; label: string } | null,
+  funding: number | null,
 ): string {
   const emoji    = signal.direction === 'long' ? '🟢' : '🔴'
   const dir      = signal.direction === 'long' ? 'LONG ▲' : 'SHORT ▼'
@@ -35,42 +35,94 @@ export function fmtSignal(
   const lines = [
     `${emoji} <b>SINAL ${signal.setup_grade} ${stars} — ${signal.asset}</b>`,
     `Direção: <b>${dir}</b>`,
+    '',
   ]
 
-  if (fg) {
-    const fgEmoji = fg.value >= 75 ? '🤑' : fg.value <= 25 ? '😱' : '😐'
-    lines.push(`Fear &amp; Greed: ${fgEmoji} <b>${fg.value}</b> — ${fg.label}`)
+  // ── Confluência de timeframes ──────────────────────────────────────────
+  if (signal.confluence) {
+    lines.push(`📊 Confluência: ${signal.confluence.visual}`)
+    lines.push(`   ${signal.confluence.details}`)
   }
 
-  if (funding !== null) {
-    const fSign = funding >= 0 ? '+' : ''
-    const fEmoji = funding > 0.0005 ? '🔥' : funding < -0.0005 ? '🧊' : '➖'
-    lines.push(`Funding Rate: ${fEmoji} <code>${fSign}${(funding * 100).toFixed(4)}%</code>`)
+  // ── Sentimento ────────────────────────────────────────────────────────
+  const sentLines: string[] = []
+  if (fg) {
+    const fgEmoji = fg.value >= 75 ? '🤑' : fg.value <= 25 ? '😱' : '😐'
+    sentLines.push(`F&amp;G: ${fgEmoji} ${fg.value} (${fg.label})`)
   }
+  if (funding !== null) {
+    const fSign  = funding >= 0 ? '+' : ''
+    const fEmoji = funding > 0.0005 ? '🔥' : funding < -0.0005 ? '🧊' : '➖'
+    sentLines.push(`Funding: ${fEmoji} ${fSign}${(funding * 100).toFixed(3)}%`)
+  }
+  if (sentLines.length) lines.push(sentLines.join(' | '))
+
+  // ── Níveis ────────────────────────────────────────────────────────────
+  const entryPct = signal.entry_zone_low > 0
+    ? ((signal.target1 - signal.entry_zone_high) / signal.entry_zone_high * 100).toFixed(1)
+    : null
+  const stopPct  = signal.entry_zone_low > 0
+    ? Math.abs((signal.stop - signal.entry_zone_low) / signal.entry_zone_low * 100).toFixed(1)
+    : null
 
   lines.push(
     '',
-    `📍 Entrada: <code>$${signal.entry_zone_low} – $${signal.entry_zone_high}</code>`,
-    `🛑 Stop:    <code>$${signal.stop}</code>`,
-    `🎯 Alvo 1:  <code>$${signal.target1}</code>  (RR <b>${signal.rr1}:1</b>)`,
-    `🎯 Alvo 2:  <code>$${signal.target2}</code>`,
+    `📍 Entrada:  <code>$${signal.entry_zone_low} – $${signal.entry_zone_high}</code>`,
+    `🛑 Stop:     <code>$${signal.stop}</code>${stopPct ? ` (-${stopPct}%)` : ''}`,
+    `🎯 Alvo 1:   <code>$${signal.target1}</code>${entryPct ? ` (+${entryPct}%)` : ''} | RR <b>${signal.rr1}:1</b>`,
+    signal.target2 ? `🎯 Alvo 2:   <code>$${signal.target2}</code>` : '',
+  ).filter(Boolean as any)
+
+  // ── Alerta de correlação ──────────────────────────────────────────────
+  if (signal.correlation?.hasAlert) {
+    lines.push('', `⚠️ <b>Correlação:</b> ${signal.correlation.message}`)
+  }
+
+  // ── Histórico do setup ────────────────────────────────────────────────
+  if (signal.history && signal.history.totalTrades >= 3) {
+    const h    = signal.history
+    const res  = h.lastResults.slice(0, 4).map((p: number) => `${p >= 0 ? '+' : ''}${p}%`).join(' | ')
+    const wrColor = h.winRate >= 60 ? '✅' : h.winRate >= 45 ? '⚠️' : '❌'
+    lines.push(
+      '',
+      `📜 <b>Histórico ${signal.asset} ${signal.direction}:</b>`,
+      `   ${res}`,
+      `   WR: <b>${h.winRate}%</b> ${wrColor} (${h.totalTrades} trades) | Média: ${h.avgPnlPct >= 0 ? '+' : ''}${h.avgPnlPct}%`,
+    )
+  }
+
+  // ── Gestão de saída ───────────────────────────────────────────────────
+  if (signal.exitStrategy) {
+    const e = signal.exitStrategy
+    lines.push(
+      '',
+      `🎯 <b>Gestão sugerida:</b>`,
+      `   ${e.partial1}`,
+      `   ${e.trailing}`,
+    )
+  }
+
+  // ── Risco sugerido ────────────────────────────────────────────────────
+  if (signal.riskSuggest) {
+    lines.push(`💰 Risco sugerido: <b>${signal.riskSuggest.riskPct}%</b> do capital (${signal.riskSuggest.rationale})`)
+  }
+
+  // ── Gatilho e cancelamento ────────────────────────────────────────────
+  lines.push(
     '',
     `⚡ <i>${signal.trigger}</i>`,
     `❌ Cancela: <i>${signal.cancellation}</i>`,
   )
 
-  // Análise IA — incluída se disponível (auto-gerada pelo Haiku no scan)
+  // ── Análise IA ────────────────────────────────────────────────────────
   if (signal.analysis) {
-    // Limpa markdown e trunca para caber no Telegram (4096 chars total)
-    const cleanAnalysis = signal.analysis
-      .replace(/\*\*/g, '<b>').replace(/\*\*/g, '</b>')
-      .slice(0, 900)
-    lines.push('', `✦ <b>Análise Rápida IA</b>`, cleanAnalysis)
+    const clean = signal.analysis.slice(0, 800)
+    lines.push('', `✦ <b>Análise IA (Haiku)</b>`, clean)
   }
 
-  lines.push('', `👉 Abrir app → Alertas → ${signal.asset}`)
+  lines.push('', `👉 App → Alertas → ${signal.asset}`)
 
-  return lines.join('\n')
+  return lines.filter(l => l !== undefined).join('\n')
 }
 
 export function fmtScanSummary(

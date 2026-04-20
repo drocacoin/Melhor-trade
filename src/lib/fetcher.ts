@@ -2,9 +2,13 @@ import { OHLCV } from './indicators'
 
 // ─── Kraken (BTC, ETH, SOL) — free, no key, no geo restrictions ─────────────
 const KRAKEN_PAIR: Record<string, string> = {
-  BTC: 'XBTUSD',
-  ETH: 'ETHUSD',
-  SOL: 'SOLUSD',
+  BTC:  'XBTUSD',
+  ETH:  'ETHUSD',
+  SOL:  'SOLUSD',
+  AVAX: 'AVAXUSD',
+  LINK: 'LINKUSD',
+  ADA:  'ADAUSD',
+  DOT:  'DOTUSD',
 }
 
 const KRAKEN_INTERVAL: Record<string, number> = {
@@ -131,9 +135,13 @@ export async function fetchLivePrice(asset: string): Promise<number> {
 
 // ─── Funding rate via Bybit (BTC/ETH/SOL — free, no key, no geo block) ───────
 const BYBIT_SYMBOL: Record<string, string> = {
-  BTC: 'BTCUSDT',
-  ETH: 'ETHUSDT',
-  SOL: 'SOLUSDT',
+  BTC:  'BTCUSDT',
+  ETH:  'ETHUSDT',
+  SOL:  'SOLUSDT',
+  AVAX: 'AVAXUSDT',
+  LINK: 'LINKUSDT',
+  ADA:  'ADAUSDT',
+  DOT:  'DOTUSDT',
 }
 
 export async function fetchFundingRate(asset: string): Promise<number | null> {
