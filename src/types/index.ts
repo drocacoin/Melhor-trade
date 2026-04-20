@@ -1,4 +1,4 @@
-export type Asset = 'BTC' | 'ETH' | 'SOL' | 'HYPE' | 'AAVE' | 'LINK' | 'AVAX' | 'GOLD'
+export type Asset = 'BTC' | 'ETH' | 'SOL' | 'HYPE' | 'AAVE' | 'LINK' | 'AVAX' | 'GOLD' | 'OIL' | 'SP500' | 'MSTR'
 export type Timeframe = 'macro' | 'trend' | 'execution' | 'refinement'
 export type Direction = 'long' | 'short'
 export type SetupGrade = 'A+' | 'A' | 'B' | 'C' | 'invalid'
@@ -128,23 +128,29 @@ export interface PerformanceSummary {
 // Grupos de correlação — alertamos quando há posições abertas no mesmo grupo
 export const CORRELATION_GROUPS: Record<string, Asset[]> = {
   crypto:      ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX'],
-  commodities: ['GOLD'],
+  commodities: ['GOLD', 'OIL'],
+  equities:    ['SP500', 'MSTR'],
 }
 
 export const ASSET_SYMBOLS: Record<Asset, string> = {
   BTC:  'BTC',  ETH:  'ETH',  SOL:  'SOL',
   HYPE: 'HYPE', AAVE: 'AAVE', LINK: 'LINK', AVAX: 'AVAX',
-  GOLD: 'PAXG',  // PAX Gold on HyperLiquid
+  GOLD: 'PAXG',   // PAX Gold on HyperLiquid
+  OIL:  'BZ=F',   // Brent crude via Yahoo Finance
+  SP500: 'SPY',   // S&P 500 ETF via Yahoo Finance
+  MSTR:  'MSTR',  // MicroStrategy via Yahoo Finance
 }
 
 export const ASSET_LABELS: Record<Asset, string> = {
   BTC:  'Bitcoin',     ETH:  'Ethereum',  SOL:  'Solana',
   HYPE: 'Hyperliquid', AAVE: 'Aave',      LINK: 'Chainlink', AVAX: 'Avalanche',
-  GOLD: 'Ouro (PAXG)',
+  GOLD: 'Ouro (PAXG)', OIL:  'Petróleo Brent',
+  SP500: 'S&P 500 (SPY)', MSTR: 'MicroStrategy',
 }
 
 export const ASSET_COLORS: Record<Asset, string> = {
   BTC:  '#F7931A', ETH:  '#627EEA', SOL:  '#9945FF',
   HYPE: '#00D4FF', AAVE: '#B6509E', LINK: '#2A5ADA', AVAX: '#E84142',
-  GOLD: '#FFD700',
+  GOLD: '#FFD700', OIL:  '#8B4513',
+  SP500: '#4CAF50', MSTR: '#FF6B00',
 }
