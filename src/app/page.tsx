@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { AssetCard } from '@/components/dashboard/AssetCard'
+import { computeThreshold } from '@/lib/threshold'
 import { Asset } from '@/types'
 
 const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'GOLD', 'OIL']
@@ -20,18 +21,25 @@ function gradeColor(grade: string) {
 
 async function getData() {
   const db = supabaseAdmin()
-  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }] =
+  const [{ data: snaps }, { data: trades }, { data: signals }, { data: macro }, { data: perf }] =
     await Promise.all([
       db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(400),
       db.from('trades').select('*').eq('status', 'open'),
       db.from('signals').select('*').eq('status', 'active').order('detected_at', { ascending: false }).limit(10),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
+      db.from('performance_summary').select('*'),
     ])
-  return { snaps: snaps ?? [], trades: trades ?? [], signals: signals ?? [], macro: macro?.[0] ?? null }
+  return {
+    snaps:   snaps   ?? [],
+    trades:  trades  ?? [],
+    signals: signals ?? [],
+    macro:   macro?.[0] ?? null,
+    perf:    perf    ?? [],
+  }
 }
 
 export default async function DashboardPage() {
-  const { snaps, trades, signals, macro } = await getData()
+  const { snaps, trades, signals, macro, perf } = await getData()
 
   const seen = new Set<string>()
   const latest = snaps.filter(s => {
@@ -40,8 +48,12 @@ export default async function DashboardPage() {
     seen.add(k); return true
   })
 
-  const byAsset = Object.fromEntries(ASSETS.map(a => [a, latest.filter(s => s.asset === a)]))
+  const byAsset    = Object.fromEntries(ASSETS.map(a => [a, latest.filter(s => s.asset === a)]))
   const latestSignal = (a: Asset) => signals.find(s => s.asset === a)
+
+  // Thresholds dinâmicos calculados no servidor
+  const perfMap    = Object.fromEntries((perf as any[]).map((p: any) => [p.asset, p]))
+  const thresholds = Object.fromEntries(ASSETS.map(a => [a, computeThreshold(perfMap[a])]))
 
   return (
     <div>
@@ -95,6 +107,31 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Threshold dinâmico por ativo */}
+      <div className="mb-6">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Exigência do scanner (ajuste automático por win rate)
+        </p>
+        <div className="grid grid-cols-5 gap-2">
+          {ASSETS.map(asset => {
+            const thr = thresholds[asset]
+            const color =
+              thr.status === 'ok'      ? 'border-emerald-500/30 bg-emerald-500/5  text-emerald-400' :
+              thr.status === 'warning' ? 'border-yellow-500/30  bg-yellow-500/5   text-yellow-400'  :
+              thr.status === 'danger'  ? 'border-red-500/30     bg-red-500/5      text-red-400'     :
+              thr.status === 'blocked' ? 'border-red-700/40     bg-red-900/10     text-red-500'     :
+                                         'border-gray-700       bg-gray-900       text-gray-400'
+            return (
+              <div key={asset} className={cn('rounded-lg border p-2.5 text-center', color)}>
+                <p className="text-xs font-bold">{asset}</p>
+                <p className="text-xl font-mono font-bold mt-0.5">{thr.threshold}<span className="text-xs font-normal opacity-60"> pts</span></p>
+                <p className="text-xs opacity-60 mt-0.5 leading-tight">{thr.reason}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {/* Asset cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

@@ -65,20 +65,25 @@ export function fmtSignal(
 }
 
 export function fmtScanSummary(
-  biases: Record<string, string>,
-  fg: { value: number; label: string } | null,
-  fundings: Record<string, number | null>,
+  biases:     Record<string, string>,
+  fg:         { value: number; label: string } | null,
+  fundings:   Record<string, number | null>,
+  thresholds: Record<string, { threshold: number; reason: string }>,
   newSignals: number,
-  now: string
+  now:        string
 ): string {
   const lines = [`🔍 <b>Scan — ${now}</b>`, '']
 
   for (const [asset, bias] of Object.entries(biases)) {
     const icon = bias === 'ALTISTA' ? '🟢' : bias === 'BAIXISTA' ? '🔴' : '🟡'
-    const fr   = fundings[asset] !== null && fundings[asset] !== undefined
+    const fr   = fundings[asset] != null
       ? ` | FR ${fundings[asset]! >= 0 ? '+' : ''}${((fundings[asset]!) * 100).toFixed(3)}%`
       : ''
-    lines.push(`${icon} <b>${asset}</b>: ${bias}${fr}`)
+    const thr  = thresholds[asset]
+    const thrStr = thr
+      ? ` | min <b>${thr.threshold}</b> pts (${thr.reason})`
+      : ''
+    lines.push(`${icon} <b>${asset}</b>: ${bias}${fr}${thrStr}`)
   }
 
   if (fg) {
