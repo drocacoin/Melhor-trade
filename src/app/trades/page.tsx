@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Trade, Asset, Direction, SetupGrade } from '@/types'
 import { fmtPrice, fmtPct, cn, gradeColor, pnlColor } from '@/lib/utils'
 
-const ASSETS: Asset[]      = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS: Asset[]      = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD']
 const GRADES: SetupGrade[] = ['A+', 'A', 'B', 'C']
 
 const empty = {

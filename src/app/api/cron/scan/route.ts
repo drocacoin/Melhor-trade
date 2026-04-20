@@ -11,7 +11,7 @@ import { Asset } from '@/types'
 
 export const maxDuration = 60
 
-const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR']
+const ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD']
 const TIMEFRAMES       = ['1wk', '1d', '4h', '1h']
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
