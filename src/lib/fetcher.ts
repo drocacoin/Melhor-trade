@@ -154,7 +154,8 @@ export async function fetchLivePrice(asset: string): Promise<number> {
       const json   = await res.json()
       const closes = (json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []) as (number | null)[]
       const valid  = closes.filter((v): v is number => v != null)
-      return valid[valid.length - 1] ?? 0
+      const raw    = valid[valid.length - 1] ?? 0
+      return Math.round(raw * 100) / 100  // arredonda para 2 casas decimais
     } catch {
       return 0
     }

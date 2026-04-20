@@ -55,14 +55,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       )
       const classEmoji = review.process_class === 'correto' ? '✅' : review.process_class === 'parcialmente_correto' ? '⚠️' : '❌'
 
+      // Escapar HTML nas strings do review
+      const safe = (s: string) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
       await sendTelegram(
         `🧠 <b>Review IA — ${trade.asset}</b>\n\n` +
         `${classEmoji} <b>${review.process_class.replace('_', ' ').toUpperCase()}</b> · Score médio: <b>${scoreMedia}/10</b>\n\n` +
         `📊 Estrutura ${review.score_estrutura} · Timing ${review.score_timing} · Indicadores ${review.score_indicadores}\n` +
         `   Risco ${review.score_risco} · Execução ${review.score_execucao} · Disciplina ${review.score_disciplina}\n\n` +
-        (review.what_went_right ? `✅ <i>${review.what_went_right}</i>\n` : '') +
-        (review.what_went_wrong ? `❌ <i>${review.what_went_wrong}</i>\n` : '') +
-        (review.new_rule ? `\n📌 <b>Nova regra:</b> ${review.new_rule}` : '')
+        (review.what_went_right ? `✅ <i>${safe(review.what_went_right)}</i>\n` : '') +
+        (review.what_went_wrong ? `❌ <i>${safe(review.what_went_wrong)}</i>\n` : '') +
+        (review.new_rule ? `\n📌 <b>Nova regra:</b> ${safe(review.new_rule)}` : '')
+      )
+    } else {
+      // autoReview falhou (sem snapshots, sem API key, etc) — avisa mas não quebra
+      await sendTelegram(
+        `⚠️ <b>Review automático indisponível — ${trade.asset}</b>\n` +
+        `<i>Sem dados técnicos suficientes na data de entrada. Faça o review manual no app.</i>`
       )
     }
 
