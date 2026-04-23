@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/evolve",
       "schedule": "0 10 * * 0"
+    },
+    {
+      "path": "/api/cron/journal",
+      "schedule": "0 10 1 * *"
     }
   ]
 }

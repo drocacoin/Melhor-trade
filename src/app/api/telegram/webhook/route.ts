@@ -42,11 +42,12 @@ export async function POST(req: NextRequest) {
     await sendTelegram(
       `🤖 <b>Melhor Trade Bot</b>\n\n` +
       `Comandos disponíveis:\n\n` +
-      `/status — Macro + Fear &amp; Greed atual\n` +
-      `/trades — Posições abertas com P&amp;L\n` +
-      `/scan   — Dispara scan manual agora\n` +
-      `/macro  — Atualiza leitura macro agora\n` +
-      `/help   — Esta mensagem`
+      `/status  — Macro + Fear &amp; Greed atual\n` +
+      `/trades  — Posições abertas com P&amp;L\n` +
+      `/scan    — Dispara scan manual agora\n` +
+      `/macro   — Atualiza leitura macro agora\n` +
+      `/journal — Resumo IA do mês atual\n` +
+      `/help    — Esta mensagem`
     )
     return NextResponse.json({ ok: true })
   }
@@ -68,6 +69,11 @@ export async function POST(req: NextRequest) {
 
   if (text === '/macro') {
     await handleMacro()
+    return NextResponse.json({ ok: true })
+  }
+
+  if (text === '/journal') {
+    await handleJournal()
     return NextResponse.json({ ok: true })
   }
 
@@ -185,4 +191,19 @@ async function handleMacro() {
   }).catch(() => {/* silencioso */})
 
   await sendTelegram(`📡 <b>Atualizando macro...</b>\n\n<i>Resultado chega em instantes.</i>`)
+}
+
+async function handleJournal() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
+
+  // Gera journal do mês atual (mesmo que incompleto)
+  const now   = new Date()
+  const month = now.toISOString().slice(0, 7)
+
+  await sendTelegram(`📔 <b>Gerando journal de ${month}...</b>\n\n<i>Chega em instantes.</i>`)
+
+  // Dispara sem await — journal envia o próprio Telegram ao terminar
+  fetch(`${appUrl}/api/cron/journal?month=${month}`, {
+    headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
+  }).catch(() => {/* silencioso */})
 }

@@ -32,14 +32,123 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   )
 }
 
+// ─── Monthly Journal Card ──────────────────────────────────────────────────────
+function MonthlyCard({ j }: { j: any }) {
+  const [open, setOpen] = useState(false)
+  const isGreen  = j.total_pnl >= 0
+  const wrEmoji  = j.winrate >= 60 ? '🟢' : j.winrate >= 50 ? '🟡' : '🔴'
+  const sign     = isGreen ? '+' : ''
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-gray-300">{j.month}</span>
+          <span className="text-xs text-gray-500">{j.trades_total} trades</span>
+          <span className={cn('text-xs font-medium px-2 py-0.5 rounded',
+            j.winrate >= 60 ? 'bg-emerald-500/20 text-emerald-400' :
+            j.winrate >= 50 ? 'bg-yellow-500/20 text-yellow-400' :
+            'bg-red-500/20 text-red-400'
+          )}>
+            {wrEmoji} WR {j.winrate?.toFixed(1)}%
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={cn('font-mono text-sm font-bold', isGreen ? 'text-emerald-400' : 'text-red-400')}>
+            {sign}${fmtPrice(j.total_pnl)}
+          </span>
+          <span className="text-gray-600 text-xs">{open ? '▲' : '▼'}</span>
+        </div>
+      </button>
+
+      {/* Expandido */}
+      {open && (
+        <div className="px-4 pb-4 border-t border-gray-800">
+          {/* Stats row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 my-4">
+            <div className="text-center">
+              <p className="text-xs text-gray-600">Wins / Losses</p>
+              <p className="text-sm font-semibold">
+                <span className="text-emerald-400">{j.winners}W</span>
+                {' / '}
+                <span className="text-red-400">{j.losers}L</span>
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-600">Média win</p>
+              <p className="text-sm font-semibold text-emerald-400">+${fmtPrice(j.avg_win)}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-600">Média loss</p>
+              <p className="text-sm font-semibold text-red-400">-${fmtPrice(Math.abs(j.avg_loss))}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-600">Melhor / Pior</p>
+              <p className="text-sm font-semibold">
+                <span className="text-emerald-400">{j.best_asset ?? '—'}</span>
+                {' / '}
+                <span className="text-red-400">{j.worst_asset ?? '—'}</span>
+              </p>
+            </div>
+          </div>
+
+          {/* Narrativa IA */}
+          {j.narrative && (
+            <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 mb-3">
+              <p className="text-xs text-blue-400 font-semibold mb-1">✦ Análise IA</p>
+              <p className="text-sm text-gray-300 leading-relaxed">{j.narrative}</p>
+            </div>
+          )}
+
+          {/* Highlights */}
+          {j.highlights?.length > 0 && (
+            <div className="space-y-1 mb-3">
+              {j.highlights.map((h: string, i: number) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <span className="text-emerald-500 mt-0.5 shrink-0">→</span>
+                  <p className="text-gray-400">{h}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Erros recorrentes */}
+          {j.top_errors?.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-600 mb-1">Erros recorrentes:</p>
+              <div className="flex flex-wrap gap-1">
+                {j.top_errors.map((e: string, i: number) => (
+                  <span key={i} className="text-xs bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded">
+                    {e}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function JournalPage() {
-  const [data, setData]   = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]         = useState<any>(null)
+  const [loading, setLoading]   = useState(true)
+  const [monthly, setMonthly]   = useState<any[]>([])
 
   useEffect(() => {
     fetch('/api/journal')
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
+
+    fetch('/api/journal/monthly')
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setMonthly(d) })
   }, [])
 
   if (loading) return (
@@ -61,7 +170,7 @@ export default function JournalPage() {
     </div>
   )
 
-  const { summary, equity, monthly, errors, perf, avgScores, processMap, rules } = data
+  const { summary, equity, monthly: monthlyPnl, errors, perf, avgScores, processMap, rules } = data
 
   return (
     <div>
@@ -69,6 +178,16 @@ export default function JournalPage() {
         <h1 className="text-2xl font-bold">Journal</h1>
         <p className="text-sm text-gray-500">Performance e análise de resultados</p>
       </div>
+
+      {/* ── Resumos Mensais IA ───────────────────────────────────────────── */}
+      {monthly.length > 0 && (
+        <div className="mb-6">
+          <p className="text-sm font-semibold text-gray-400 mb-3">📔 Resumos Mensais (IA)</p>
+          <div className="space-y-2">
+            {monthly.map(j => <MonthlyCard key={j.month} j={j} />)}
+          </div>
+        </div>
+      )}
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
@@ -151,18 +270,18 @@ export default function JournalPage() {
         )}
 
         {/* Monthly P&L */}
-        {monthly.length > 0 && (
+        {monthlyPnl.length > 0 && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <p className="text-sm font-semibold text-gray-400 mb-4">P&L mensal</p>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={monthly} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <BarChart data={monthlyPnl} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6b7280' }} />
                 <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={v => `$${v}`} />
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={0} stroke="#374151" />
                 <Bar dataKey="pnl" name="P&L" radius={[3, 3, 0, 0]}>
-                  {monthly.map((m: any, i: number) => (
+                  {monthlyPnl.map((m: any, i: number) => (
                     <Cell key={i} fill={pnlColor(m.pnl)} />
                   ))}
                 </Bar>
