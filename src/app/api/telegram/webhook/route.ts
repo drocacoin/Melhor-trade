@@ -42,12 +42,13 @@ export async function POST(req: NextRequest) {
     await sendTelegram(
       `🤖 <b>Melhor Trade Bot</b>\n\n` +
       `Comandos disponíveis:\n\n` +
-      `/status  — Macro + Fear &amp; Greed atual\n` +
-      `/trades  — Posições abertas com P&amp;L\n` +
-      `/scan    — Dispara scan manual agora\n` +
-      `/macro   — Atualiza leitura macro agora\n` +
-      `/journal — Resumo IA do mês atual\n` +
-      `/help    — Esta mensagem`
+      `/status   — Macro + Fear &amp; Greed atual\n` +
+      `/trades   — Posições abertas com P&amp;L\n` +
+      `/scan     — Dispara scan manual agora\n` +
+      `/macro    — Atualiza leitura macro agora\n` +
+      `/journal  — Resumo IA do mês atual\n` +
+      `/analisar — Análise completa + recomendação\n` +
+      `/help     — Esta mensagem`
     )
     return NextResponse.json({ ok: true })
   }
@@ -74,6 +75,11 @@ export async function POST(req: NextRequest) {
 
   if (text === '/journal') {
     await handleJournal()
+    return NextResponse.json({ ok: true })
+  }
+
+  if (text === '/analisar') {
+    await handleAdvisor()
     return NextResponse.json({ ok: true })
   }
 
@@ -206,4 +212,47 @@ async function handleJournal() {
   fetch(`${appUrl}/api/cron/journal?month=${month}`, {
     headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
   }).catch(() => {/* silencioso */})
+}
+
+async function handleAdvisor() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
+
+  await sendTelegram(`✦ <b>Analisando todos os dados...</b>\n\n<i>Claude Sonnet está avaliando macro, scores, posições e performance. Chega em ~15s.</i>`)
+
+  try {
+    const r = await fetch(`${appUrl}/api/advisor`, { method: 'POST' })
+    if (!r.ok) throw new Error(`status ${r.status}`)
+
+    const { analysis: a, context: ctx } = await r.json()
+    if (!a) throw new Error('sem análise')
+
+    const overallEmoji = a.overall === 'favorável' ? '🟢' : a.overall === 'desfavorável' ? '🔴' : '🟡'
+    const urgEmoji = (u: string) => u === 'alta' ? '🔥' : u === 'média' ? '📌' : '💡'
+
+    const opLines = (a.opportunities ?? []).slice(0, 3).map((op: any) =>
+      `${urgEmoji(op.urgency)} <b>${op.asset}</b> ${op.direction.toUpperCase()} — ${op.rationale.slice(0, 100)}`
+    ).join('\n')
+
+    const posLines = (a.open_positions ?? []).map((p: any) =>
+      `${p.action === 'fechar' ? '✗' : p.action === 'manter' ? '✓' : '↑'} <b>${p.asset}</b>: ${p.reason.slice(0, 80)}`
+    ).join('\n')
+
+    const riskLines = (a.risks ?? []).slice(0, 2).map((r: string) =>
+      `⚠ ${r.slice(0, 100)}`
+    ).join('\n')
+
+    let msg =
+      `✦ <b>Análise Completa — Melhor Trade</b>\n\n` +
+      `${overallEmoji} Mercado: <b>${a.overall.toUpperCase()}</b>\n` +
+      `<i>${a.market_view}</i>\n\n`
+
+    if (opLines) msg += `📊 <b>Oportunidades:</b>\n${opLines}\n\n`
+    if (posLines) msg += `📋 <b>Posições abertas:</b>\n${posLines}\n\n`
+    if (riskLines) msg += `⚠ <b>Riscos:</b>\n${riskLines}\n\n`
+    if (a.recommendation) msg += `💡 <b>Recomendação:</b>\n${a.recommendation}`
+
+    await sendTelegram(msg)
+  } catch (e: any) {
+    await sendTelegram(`❌ <b>Erro na análise:</b> ${e.message}\n\nTente novamente em instantes.`)
+  }
 }

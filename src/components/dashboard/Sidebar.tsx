@@ -11,6 +11,7 @@ const nav = [
   { href: '/alerts',    label: 'Alertas',     icon: '⚡' },
   { href: '/journal',   label: 'Journal',     icon: '≡' },
   { href: '/backtest',  label: 'Backtest',    icon: '⟳' },
+  { href: '/advisor',   label: 'Advisor IA',  icon: '✦' },
 ]
 
 export function Sidebar() {
