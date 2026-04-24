@@ -43,9 +43,9 @@ export default function AdvisorPage() {
     setError(null)
     try {
       const r = await fetch('/api/advisor', { method: 'POST' })
-      if (!r.ok) throw new Error(`Erro ${r.status}`)
-      const d = await r.json()
-      if (d.error) throw new Error(d.error)
+      const d = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(d?.error ?? d?.details ?? `Erro ${r.status}`)
+      if (d?.error) throw new Error(d.error)
       setResult(d)
     } catch (e: any) {
       setError(e.message)

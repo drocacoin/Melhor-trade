@@ -125,25 +125,14 @@ export async function POST() {
       `Responda APENAS com JSON válido, sem markdown, sem blocos de código:\n` +
       `{"overall":"favorável","market_view":"...","opportunities":[{"asset":"X","direction":"long","urgency":"alta","score":7.5,"rationale":"..."}],"open_positions":[{"asset":"X","action":"manter","reason":"..."}],"risks":["..."],"recommendation":"..."}`
 
-    // ── 6. Chamar Claude ─────────────────────────────────────────────────────
+    // ── 6. Chamar Claude Haiku ───────────────────────────────────────────────
     const client = new Anthropic()
-
-    // Tenta Sonnet primeiro, cai para Haiku se não disponível
-    let raw = ''
-    for (const model of ['claude-sonnet-4-5', 'claude-haiku-4-5']) {
-      try {
-        const resp = await client.messages.create({
-          model,
-          max_tokens: 1200,
-          messages:   [{ role: 'user', content: prompt }],
-        })
-        raw = (resp.content[0] as any).text ?? ''
-        break
-      } catch (e: any) {
-        console.warn(`[advisor] model ${model} falhou:`, e.message)
-        if (model === 'claude-haiku-4-5') throw e  // último fallback — re-lança
-      }
-    }
+    const resp = await client.messages.create({
+      model:      'claude-haiku-4-5',
+      max_tokens: 1200,
+      messages:   [{ role: 'user', content: prompt }],
+    })
+    const raw = (resp.content[0] as any).text ?? ''
 
     // Extrair JSON da resposta (tolera markdown ```json ... ```)
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
