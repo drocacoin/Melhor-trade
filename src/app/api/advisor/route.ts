@@ -126,7 +126,10 @@ export async function POST() {
       `{"overall":"favorável","market_view":"...","opportunities":[{"asset":"X","direction":"long","urgency":"alta","score":7.5,"rationale":"..."}],"open_positions":[{"asset":"X","action":"manter","reason":"..."}],"risks":["..."],"recommendation":"..."}`
 
     // ── 6. Chamar Claude Haiku ───────────────────────────────────────────────
-    const client = new Anthropic()
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no Vercel — adicione em Settings → Environment Variables')
+
+    const client = new Anthropic({ apiKey })
     const resp = await client.messages.create({
       model:      'claude-haiku-4-5',
       max_tokens: 1200,
