@@ -10,6 +10,7 @@ const nav = [
   { href: '/macro',     label: 'Macro',       icon: '◎' },
   { href: '/alerts',    label: 'Alertas',     icon: '⚡' },
   { href: '/journal',   label: 'Journal',     icon: '≡' },
+  { href: '/backtest',  label: 'Backtest',    icon: '⟳' },
 ]
 
 export function Sidebar() {
