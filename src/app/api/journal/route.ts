@@ -75,13 +75,63 @@ export async function GET() {
     .map((r: any) => ({ rule: r.new_rule, reviewed_at: r.reviewed_at }))
 
   // Summary stats
-  const winners  = closed.filter(t => (t.pnl_usd ?? 0) > 0)
-  const losers   = closed.filter(t => (t.pnl_usd ?? 0) <= 0)
+  const isWin   = (t: any) => t.pnl_usd != null ? t.pnl_usd > 0 : (t.pnl_pct ?? 0) > 0
+  const winners  = closed.filter(isWin)
+  const losers   = closed.filter(t => !isWin(t))
   const totalPnl = closed.reduce((s, t) => s + (t.pnl_usd ?? 0), 0)
-  const best     = closed.reduce((b, t) => (t.pnl_usd ?? 0) > (b.pnl_usd ?? 0) ? t : b, closed[0] ?? null)
-  const worst    = closed.reduce((w, t) => (t.pnl_usd ?? 0) < (w.pnl_usd ?? 0) ? t : w, closed[0] ?? null)
+  const best     = closed.length ? closed.reduce((b, t) => (t.pnl_usd ?? 0) > (b.pnl_usd ?? 0) ? t : b) : null
+  const worst    = closed.length ? closed.reduce((w, t) => (t.pnl_usd ?? 0) < (w.pnl_usd ?? 0) ? t : w) : null
   const avgWin   = winners.length ? winners.reduce((s, t) => s + (t.pnl_usd ?? 0), 0) / winners.length : 0
   const avgLoss  = losers.length  ? losers.reduce((s, t)  => s + (t.pnl_usd ?? 0), 0) / losers.length  : 0
+
+  // ── Métricas avançadas ─────────────────────────────────────────────────────
+
+  // Max Drawdown — pior queda pico→fundo da equity curve
+  let peak = 0; let maxDD = 0; let cumPnl = 0
+  for (const t of closed) {
+    cumPnl += t.pnl_usd ?? 0
+    if (cumPnl > peak) peak = cumPnl
+    const dd = peak - cumPnl
+    if (dd > maxDD) maxDD = dd
+  }
+  const maxDrawdownPct = peak > 0 ? (maxDD / peak) * 100 : 0
+
+  // Streak atual — sequência de wins ou losses no fim da lista
+  let streak = 0; let streakType: 'win' | 'loss' | null = null
+  for (let i = closed.length - 1; i >= 0; i--) {
+    const w = isWin(closed[i])
+    if (i === closed.length - 1) { streakType = w ? 'win' : 'loss'; streak = 1 }
+    else if ((streakType === 'win' && w) || (streakType === 'loss' && !w)) streak++
+    else break
+  }
+
+  // Profit Factor — gross win / gross loss
+  const grossWin  = winners.reduce((s, t) => s + (t.pnl_usd ?? 0), 0)
+  const grossLoss = Math.abs(losers.reduce((s, t) => s + (t.pnl_usd ?? 0), 0))
+  const profitFactor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : null
+
+  // Recovery Factor — totalPnl / maxDrawdown
+  const recoveryFactor = maxDD > 0 ? Math.round((totalPnl / maxDD) * 100) / 100 : null
+
+  // Tempo médio de trade (dias)
+  const holdingDays = closed
+    .filter(t => t.opened_at && t.closed_at)
+    .map(t => {
+      const diff = new Date(t.closed_at).getTime() - new Date(t.opened_at).getTime()
+      return diff / (1000 * 3600 * 24)
+    })
+  const avgHoldingDays = holdingDays.length
+    ? Math.round(holdingDays.reduce((s, d) => s + d, 0) / holdingDays.length * 10) / 10
+    : null
+
+  // Melhor e pior streak histórico
+  let bestStreak = 0; let worstStreak = 0
+  let curW = 0; let curL = 0
+  for (const t of closed) {
+    if (isWin(t)) { curW++; curL = 0 } else { curL++; curW = 0 }
+    if (curW > bestStreak)  bestStreak  = curW
+    if (curL > worstStreak) worstStreak = curL
+  }
 
   return NextResponse.json({
     equity, monthly, errors,
@@ -99,6 +149,17 @@ export async function GET() {
       avgLoss:  Math.round(avgLoss * 100) / 100,
       best:     best  ? { asset: best.asset,  pnl: best.pnl_usd  } : null,
       worst:    worst ? { asset: worst.asset, pnl: worst.pnl_usd } : null,
+    },
+    risk: {
+      maxDrawdown:     Math.round(maxDD * 100) / 100,
+      maxDrawdownPct:  Math.round(maxDrawdownPct * 10) / 10,
+      profitFactor,
+      recoveryFactor,
+      avgHoldingDays,
+      streak,
+      streakType,
+      bestStreak,
+      worstStreak,
     },
   })
 }

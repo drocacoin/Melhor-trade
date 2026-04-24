@@ -170,7 +170,7 @@ export default function JournalPage() {
     </div>
   )
 
-  const { summary, equity, monthly: monthlyPnl, errors, perf, avgScores, processMap, rules } = data
+  const { summary, equity, monthly: monthlyPnl, errors, perf, avgScores, processMap, rules, risk } = data
 
   return (
     <div>
@@ -185,6 +185,104 @@ export default function JournalPage() {
           <p className="text-sm font-semibold text-gray-400 mb-3">📔 Resumos Mensais (IA)</p>
           <div className="space-y-2">
             {monthly.map(j => <MonthlyCard key={j.month} j={j} />)}
+          </div>
+        </div>
+      )}
+
+      {/* ── Métricas de risco profissional ──────────────────────────────────── */}
+      {risk && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <p className="text-sm font-semibold text-gray-400 mb-4">⚡ Métricas de risco</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+
+            {/* Streak atual */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Streak atual</p>
+              {risk.streakType ? (
+                <p className={cn(
+                  'text-2xl font-bold font-mono',
+                  risk.streakType === 'win' ? 'text-emerald-400' : 'text-red-400'
+                )}>
+                  {risk.streakType === 'win' ? '+' : '-'}{risk.streak}
+                </p>
+              ) : <p className="text-2xl font-bold text-gray-700">—</p>}
+              <p className="text-xs text-gray-700 mt-0.5">
+                {risk.streakType === 'win' ? 'wins seguidos' : risk.streakType === 'loss' ? 'losses seguidos' : ''}
+              </p>
+            </div>
+
+            {/* Max Drawdown */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Max Drawdown</p>
+              <p className={cn(
+                'text-2xl font-bold font-mono',
+                risk.maxDrawdownPct > 20 ? 'text-red-400' : risk.maxDrawdownPct > 10 ? 'text-yellow-400' : 'text-gray-300'
+              )}>
+                {risk.maxDrawdownPct.toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-700 mt-0.5">${fmtPrice(risk.maxDrawdown)}</p>
+            </div>
+
+            {/* Profit Factor */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Profit Factor</p>
+              {risk.profitFactor != null ? (
+                <p className={cn(
+                  'text-2xl font-bold font-mono',
+                  risk.profitFactor >= 2   ? 'text-emerald-400' :
+                  risk.profitFactor >= 1.5 ? 'text-yellow-400' :
+                  risk.profitFactor >= 1   ? 'text-gray-300'   : 'text-red-400'
+                )}>
+                  {risk.profitFactor.toFixed(2)}
+                </p>
+              ) : <p className="text-2xl font-bold text-gray-700">—</p>}
+              <p className="text-xs text-gray-700 mt-0.5">gross win / loss</p>
+            </div>
+
+            {/* Recovery Factor */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Recovery Factor</p>
+              {risk.recoveryFactor != null ? (
+                <p className={cn(
+                  'text-2xl font-bold font-mono',
+                  risk.recoveryFactor >= 3 ? 'text-emerald-400' :
+                  risk.recoveryFactor >= 1 ? 'text-yellow-400' : 'text-red-400'
+                )}>
+                  {risk.recoveryFactor.toFixed(2)}
+                </p>
+              ) : <p className="text-2xl font-bold text-gray-700">—</p>}
+              <p className="text-xs text-gray-700 mt-0.5">P&L / drawdown</p>
+            </div>
+
+            {/* Avg holding */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Tempo médio</p>
+              {risk.avgHoldingDays != null ? (
+                <p className="text-2xl font-bold font-mono text-gray-300">
+                  {risk.avgHoldingDays}d
+                </p>
+              ) : <p className="text-2xl font-bold text-gray-700">—</p>}
+              <p className="text-xs text-gray-700 mt-0.5">por trade</p>
+            </div>
+
+            {/* Melhor streak */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Melhor streak</p>
+              <p className="text-2xl font-bold font-mono text-emerald-400">
+                {risk.bestStreak > 0 ? `+${risk.bestStreak}` : '—'}
+              </p>
+              <p className="text-xs text-gray-700 mt-0.5">wins seguidos</p>
+            </div>
+
+            {/* Pior streak */}
+            <div className="text-center">
+              <p className="text-xs text-gray-600 mb-1">Pior streak</p>
+              <p className="text-2xl font-bold font-mono text-red-400">
+                {risk.worstStreak > 0 ? `-${risk.worstStreak}` : '—'}
+              </p>
+              <p className="text-xs text-gray-700 mt-0.5">losses seguidos</p>
+            </div>
+
           </div>
         </div>
       )}

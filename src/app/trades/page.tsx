@@ -164,6 +164,75 @@ export default function TradesPage() {
         ))}
       </div>
 
+      {/* Portfolio Heat */}
+      {open.length > 0 && (() => {
+        const longs  = open.filter(t => t.direction === 'long')
+        const shorts = open.filter(t => t.direction === 'short')
+        // Risco médio de stop por trade (dist % entrada→stop)
+        const risks  = open.map(t => {
+          const price = prices[t.asset] || t.entry_price
+          if (!t.stop_price || !t.entry_price) return null
+          return Math.abs(t.entry_price - t.stop_price) / t.entry_price * 100
+        }).filter(Boolean) as number[]
+        const avgRisk = risks.length ? risks.reduce((s, r) => s + r, 0) / risks.length : null
+
+        // Alerta de correlação: múltiplos cripto longs
+        const cryptos = ['BTC','ETH','SOL','HYPE','AAVE','LINK','AVAX','XRP','SUI','DOGE','TAO']
+        const cryptoLongs = longs.filter(t => cryptos.includes(t.asset)).length
+        const corrAlert   = cryptoLongs >= 3
+
+        return (
+          <div className={cn(
+            'rounded-xl border p-4 mb-6',
+            corrAlert ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-gray-900 border-gray-800'
+          )}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Portfolio Heat
+              </p>
+              {corrAlert && (
+                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">
+                  ⚠ {cryptoLongs} cripto-longs correlacionados
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-6 text-sm">
+              <div className="text-center">
+                <p className="text-lg font-bold text-emerald-400">{longs.length}</p>
+                <p className="text-xs text-gray-600">Longs</p>
+              </div>
+              <div className="text-gray-700 text-lg">vs</div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-red-400">{shorts.length}</p>
+                <p className="text-xs text-gray-600">Shorts</p>
+              </div>
+              {avgRisk != null && (
+                <>
+                  <div className="h-8 w-px bg-gray-800" />
+                  <div className="text-center">
+                    <p className={cn('text-lg font-bold font-mono',
+                      avgRisk > 5 ? 'text-red-400' : avgRisk > 3 ? 'text-yellow-400' : 'text-gray-300'
+                    )}>{avgRisk.toFixed(1)}%</p>
+                    <p className="text-xs text-gray-600">Stop dist. médio</p>
+                  </div>
+                </>
+              )}
+              <div className="h-8 w-px bg-gray-800" />
+              <div className="flex flex-wrap gap-1">
+                {open.map(t => (
+                  <span key={t.id} className={cn(
+                    'text-xs px-2 py-0.5 rounded font-medium',
+                    t.direction === 'long' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                  )}>
+                    {t.asset}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Open trade form */}
       {showForm && (
         <form onSubmit={openTrade} className="bg-gray-900 border border-emerald-500/30 rounded-xl p-6 mb-6">
