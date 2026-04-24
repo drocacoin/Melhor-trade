@@ -39,7 +39,7 @@ export async function POST() {
       db.from('signals').select('*').eq('status', 'active').order('detected_at', { ascending: false }).limit(10),
       db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(500),
       db.from('performance_summary').select('*'),
-      db.from('monthly_journals').select('*').order('month', { ascending: false }).limit(1).then(r => r).catch(() => ({ data: null })),
+      db.from('monthly_journals').select('*').order('month', { ascending: false }).limit(1),
     ])
 
     const macro   = macroRow?.[0] ?? null
