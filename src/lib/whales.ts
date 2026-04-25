@@ -8,13 +8,27 @@
  * 4. Agrega sentimento (long/short) por ativo
  */
 
-const HL = 'https://api.hyperliquid.xyz/info'
+const HL_INFO  = 'https://api.hyperliquid.xyz/info'
+// Leaderboard fica num endpoint de stats separado (não aceita no /info → 422)
+const HL_STATS = 'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard'
 
+/** POST para /info (clearinghouseState, allMids, etc.) */
 async function hl(body: object) {
-  const r = await fetch(HL, {
+  const r = await fetch(HL_INFO, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
+    cache:   'no-store',
+  })
+  if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
+  return r.json()
+}
+
+/** GET para o leaderboard de stats */
+async function hlLeaderboard() {
+  const r = await fetch(HL_STATS, {
+    method:  'GET',
+    headers: { 'Content-Type': 'application/json' },
     cache:   'no-store',
   })
   if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
@@ -63,8 +77,10 @@ export interface AssetSentiment {
 
 // ── Leaderboard + filtro de qualidade ────────────────────────────────────────
 export async function fetchTopWhales(limit = 25): Promise<WhaleTrader[]> {
-  const data = await hl({ type: 'leaderboard' })
-  const rows: any[] = data.leaderboardRows ?? data ?? []
+  const data = await hlLeaderboard()
+  // stats endpoint pode retornar { leaderboardRows: [...] } ou array direto
+  const rows: any[] = Array.isArray(data) ? data : (data.leaderboardRows ?? [])
+  if (!rows.length) throw new Error(`HyperLiquid leaderboard vazio (shape: ${JSON.stringify(Object.keys(data ?? {})).slice(0, 80)})`)
 
   return rows
     .map((r: any) => {

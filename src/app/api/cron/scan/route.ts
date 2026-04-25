@@ -7,6 +7,7 @@ import { computeThreshold } from '@/lib/threshold'
 import { loadWeights } from '@/lib/weights'
 import { generateSignalAnalysis } from '@/lib/signal-analysis'
 import { fetchSetupHistory, checkCorrelation, suggestRisk, buildExitStrategy, buildConfluence } from '@/lib/signal-context'
+import { fetchWhaleSentiment, AssetSentiment } from '@/lib/whales'
 import { Asset } from '@/types'
 
 export const maxDuration = 300  // Vercel Pro — até 5 min por execução
@@ -26,18 +27,23 @@ export async function GET(req: NextRequest) {
   const db = supabaseAdmin()
 
   // ── Contexto global ────────────────────────────────────────────────────────
-  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }] = await Promise.all([
+  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }, whaleData] = await Promise.all([
     fetchFearAndGreed(),
     Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]))),
     db.from('performance_summary').select('*'),
     db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
     db.from('trades').select('*').eq('status', 'open'),
+    fetchWhaleSentiment().catch(() => null),  // não bloqueia o scan se HL estiver fora
   ])
 
   const fundingMap  = Object.fromEntries(fundings)
   const perfMap: Record<string, any>  = {}
   for (const p of perfRows ?? []) perfMap[p.asset] = p
   const latestMacro = macroRow?.[0] ?? null
+
+  // Mapa de sentimento das baleias por ativo
+  const whaleMap: Record<string, AssetSentiment> = {}
+  for (const s of whaleData?.sentiment ?? []) whaleMap[s.asset] = s
 
   // Thresholds dinâmicos
   const thresholds: Record<string, ReturnType<typeof computeThreshold>> = {}
@@ -81,10 +87,11 @@ export async function GET(req: NextRequest) {
     // ── Detectar sinal com pesos dinâmicos ────────────────────────────────
     const { threshold } = thresholds[asset]
     const weights = await loadWeights(asset)
-    const signal  = detectSignal(asset, snapshots, fg, threshold, weights, latestMacro)
+    const signal  = detectSignal(asset, snapshots, fg, threshold, weights, latestMacro, whaleMap)
 
     if (signal) {
       // Enriquecer com contexto
+      const whale = whaleMap[asset]
       const [history, exitStrategy, confluence] = await Promise.all([
         fetchSetupHistory(db, asset, signal.direction),
         Promise.resolve(buildExitStrategy(signal.rr1, signal.target1, signal.target2)),
@@ -94,7 +101,14 @@ export async function GET(req: NextRequest) {
       const correlation = checkCorrelation(asset, signal.direction, openTrades ?? [])
       const riskSuggest = suggestRisk(history?.winRate ?? null, signal.rr1)
 
-      const enriched = { ...signal, history, exitStrategy, confluence, correlation, riskSuggest }
+      const enriched = {
+        ...signal,
+        history, exitStrategy, confluence, correlation, riskSuggest,
+        // Contexto das baleias (não vai ao DB, só ao Telegram)
+        whale_sentiment: whale?.sentiment ?? null,
+        whale_pct:       whale?.sentimentPct ?? null,
+        whale_count:     whale ? whale.longCount + whale.shortCount : 0,
+      }
 
       const { data } = await db.from('signals').insert(signal).select().single()
       if (data) {
@@ -140,6 +154,7 @@ function detectSignal(
   minScore: number,
   weights:  Awaited<ReturnType<typeof loadWeights>>,
   macro:    any,
+  whaleMap: Record<string, AssetSentiment> = {},
 ) {
   const d  = snaps['1d']
   const h4 = snaps['4h']
@@ -177,6 +192,24 @@ function detectSignal(
   if (fg) {
     if (fg.value >= 80) bullScore -= 1
     if (fg.value <= 20) bearScore -= 1
+  }
+
+  // ── Sentimento das baleias (top traders HyperLiquid por consistência) ──────
+  // Exige mínimo de 2 traders posicionados para ter relevância estatística.
+  // Bullish: baleias majoritariamente long → reforça bull (+1.5, +0.5 se >75%)
+  // Bearish: baleias majoritariamente short → reforça bear (+1.5, +0.5 se <25%)
+  // Divergência implícita: se baleias vão na direção contrária ao sinal técnico,
+  //   o boost vai para o lado delas, reduzindo a vantagem do sinal técnico.
+  const whale = whaleMap[asset]
+  if (whale && whale.longCount + whale.shortCount >= 2) {
+    if (whale.sentiment === 'bullish') {
+      bullScore += 1.5
+      if (whale.sentimentPct > 75) bullScore += 0.5  // maioria esmagadora
+    } else if (whale.sentiment === 'bearish') {
+      bearScore += 1.5
+      if (whale.sentimentPct < 25) bearScore += 0.5  // maioria esmagadora de shorts
+    }
+    // neutral: baleias divididas → sem ajuste
   }
 
   const isLong  = bullScore >= minScore

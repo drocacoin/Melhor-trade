@@ -57,6 +57,18 @@ export function fmtSignal(
   }
   if (sentLines.length) lines.push(sentLines.join(' | '))
 
+  // ── Baleias HyperLiquid ───────────────────────────────────────────────
+  if (signal.whale_sentiment && signal.whale_count >= 2) {
+    const wEmoji   = signal.whale_sentiment === 'bullish' ? '🟢'
+                   : signal.whale_sentiment === 'bearish' ? '🔴' : '🟡'
+    const confirms = (signal.direction === 'long'  && signal.whale_sentiment === 'bullish')
+                  || (signal.direction === 'short' && signal.whale_sentiment === 'bearish')
+    const tag      = confirms ? ' ✅ confirmado' : ' ⚠️ divergência'
+    lines.push(
+      `🐳 Baleias (${signal.whale_count} traders): ${wEmoji} ${signal.whale_pct}% long${tag}`
+    )
+  }
+
   // ── Níveis ────────────────────────────────────────────────────────────
   const entryPct = signal.entry_zone_low > 0
     ? ((signal.target1 - signal.entry_zone_high) / signal.entry_zone_high * 100).toFixed(1)
