@@ -84,10 +84,12 @@ export async function fetchTopWhales(limit = 25): Promise<WhaleTrader[]> {
 
   return rows
     .map((r: any) => {
-      const windowPnl = (r.windowPnl ?? []) as any[]
-      const get = (name: string) => parseFloat(
-        windowPnl.find((w: any) => w.windowName === name)?.pnl ?? '0'
-      )
+      // HL retorna windowPerformances como array de arrays: [["day", {pnl,roi,vlm}], ...]
+      const windowPerformances = (r.windowPerformances ?? []) as any[]
+      const get = (name: string) => {
+        const entry = windowPerformances.find((w: any) => w[0] === name)
+        return parseFloat(entry?.[1]?.pnl ?? '0')
+      }
       const pnl30d  = get('month')
       const pnl7d   = get('week')
       const pnl1d   = get('day')
