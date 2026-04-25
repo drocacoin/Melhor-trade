@@ -10,6 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
 import { computeLiveScore } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
+import { fetchWhaleSentiment } from '@/lib/whales'
 import Anthropic from '@anthropic-ai/sdk'
 import { Asset } from '@/types'
 
@@ -31,6 +32,7 @@ export async function POST() {
       { data: snapsAll },
       { data: perfRows },
       { data: monthlyJournal },
+      whaleSentiment,
     ] = await Promise.all([
       fetchFearAndGreed().catch(() => null),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
@@ -40,6 +42,7 @@ export async function POST() {
       db.from('snapshots').select('*').order('captured_at', { ascending: false }).limit(500),
       db.from('performance_summary').select('*'),
       db.from('monthly_journals').select('*').order('month', { ascending: false }).limit(1),
+      fetchWhaleSentiment().catch(() => null),
     ])
 
     const macro   = macroRow?.[0] ?? null
@@ -107,6 +110,16 @@ export async function POST() {
         ).join('\n')
       : 'Sem sinais ativos.'
 
+    // Sentimento das baleias
+    const whaleText = whaleSentiment?.sentiment?.length
+      ? whaleSentiment.sentiment
+          .filter((s: any) => s.longCount + s.shortCount >= 2)
+          .slice(0, 8)
+          .map((s: any) =>
+            `${s.asset}: ${s.sentimentPct}% long (${s.longCount}L/${s.shortCount}S) — ${s.sentiment.toUpperCase()} | vol $${Math.round((s.longValue + s.shortValue) / 1000)}k`
+          ).join('\n')
+      : 'Dados de baleias indisponíveis.'
+
     const mj = (monthlyJournal as any)?.[0]
     const perfText =
       `Últimos ${closed.length} trades: WR ${winrate.toFixed(1)}% (${wins}W/${closed.length - wins}L) | P&L $${totalPnl.toFixed(2)}` +
@@ -116,6 +129,7 @@ export async function POST() {
       `Você é um analista sênior de swing trade quantitativo. Analise os dados e forneça recomendações específicas.\n\n` +
       `━━ MACRO ━━\n${macroText}\n\n` +
       `━━ FEAR & GREED ━━\n${fgText}\n\n` +
+      `━━ BALEIAS (top traders HyperLiquid por consistência) ━━\n${whaleText}\n\n` +
       `━━ SCORES TÉCNICOS (top 8, ordenados por proximidade do sinal) ━━\n${scoresText}\n\n` +
       `━━ POSIÇÕES ABERTAS ━━\n${openText}\n\n` +
       `━━ SINAIS ATIVOS ━━\n${signalsText}\n\n` +

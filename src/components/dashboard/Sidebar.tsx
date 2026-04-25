@@ -12,6 +12,7 @@ const nav = [
   { href: '/journal',   label: 'Journal',     icon: '≡' },
   { href: '/backtest',  label: 'Backtest',    icon: '⟳' },
   { href: '/advisor',   label: 'Advisor IA',  icon: '✦' },
+  { href: '/whales',    label: 'Baleias',     icon: '🐳' },
 ]
 
 export function Sidebar() {

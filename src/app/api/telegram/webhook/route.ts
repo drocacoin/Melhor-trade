@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
 import { fetchLivePrice, fetchFearAndGreed } from '@/lib/fetcher'
+import { fetchWhaleSentiment } from '@/lib/whales'
 import { Asset } from '@/types'
 
 export const maxDuration = 60
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
       `/macro    — Atualiza leitura macro agora\n` +
       `/journal  — Resumo IA do mês atual\n` +
       `/analisar — Análise completa + recomendação\n` +
+      `/baleias  — Sentimento dos top traders HL\n` +
       `/help     — Esta mensagem`
     )
     return NextResponse.json({ ok: true })
@@ -80,6 +82,11 @@ export async function POST(req: NextRequest) {
 
   if (text === '/analisar') {
     await handleAdvisor()
+    return NextResponse.json({ ok: true })
+  }
+
+  if (text === '/baleias') {
+    await handleWhales()
     return NextResponse.json({ ok: true })
   }
 
@@ -254,5 +261,34 @@ async function handleAdvisor() {
     await sendTelegram(msg)
   } catch (e: any) {
     await sendTelegram(`❌ <b>Erro na análise:</b> ${e.message}\n\nTente novamente em instantes.`)
+  }
+}
+
+async function handleWhales() {
+  await sendTelegram(`🐳 <b>Buscando posições das baleias...</b>\n\n<i>Analisando top traders HyperLiquid. Aguarde ~15s.</i>`)
+
+  try {
+    const { traders, sentiment } = await fetchWhaleSentiment()
+
+    const bullish = sentiment.filter((s: any) => s.sentiment === 'bullish')
+    const bearish = sentiment.filter((s: any) => s.sentiment === 'bearish')
+
+    const sentimentLines = sentiment
+      .filter((s: any) => s.longCount + s.shortCount >= 2)
+      .slice(0, 10)
+      .map((s: any) => {
+        const emoji = s.sentiment === 'bullish' ? '🟢' : s.sentiment === 'bearish' ? '🔴' : '🟡'
+        return `${emoji} <b>${s.asset}</b>: ${s.sentimentPct}% long (${s.longCount}L/${s.shortCount}S)`
+      }).join('\n')
+
+    const msg =
+      `🐳 <b>Baleias HyperLiquid</b>\n\n` +
+      `👥 <b>${traders.length} top traders</b> rastreados\n` +
+      `🟢 ${bullish.length} ativos bullish | 🔴 ${bearish.length} ativos bearish\n\n` +
+      (sentimentLines ? `<b>Sentimento por ativo:</b>\n${sentimentLines}` : 'Sem posições significativas.')
+
+    await sendTelegram(msg)
+  } catch (e: any) {
+    await sendTelegram(`❌ <b>Erro ao buscar baleias:</b> ${e.message}`)
   }
 }
