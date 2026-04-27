@@ -30,6 +30,7 @@ export default function TradesPage() {
   const [form, setForm]           = useState(empty)
   const [closing, setClosing]     = useState<{ id: number; price: string } | null>(null)
   const [editStop, setEditStop]   = useState<{ id: number; stop: string } | null>(null)
+  const [deleting, setDeleting]   = useState<{ id: number; asset: string } | null>(null)
   const [showForm, setShowForm]   = useState(false)
   const [loading, setLoading]     = useState(false)
   const [tab, setTab]             = useState<'open' | 'closed'>('open')
@@ -82,6 +83,13 @@ export default function TradesPage() {
       body: JSON.stringify({ close_price: +closing.price }),
     })
     setClosing(null); setLoading(false); load()
+  }
+
+  async function deleteTrade() {
+    if (!deleting) return
+    setLoading(true)
+    await fetch(`/api/trades/${deleting.id}`, { method: 'DELETE' })
+    setDeleting(null); setLoading(false); load()
   }
 
   async function updateStop() {
@@ -464,6 +472,12 @@ export default function TradesPage() {
                       className="text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 px-3 py-1.5 rounded transition-colors font-medium">
                       Fechar posição
                     </button>
+                    <button
+                      onClick={() => setDeleting({ id: t.id, asset: t.asset })}
+                      className="text-xs bg-gray-800 text-gray-500 hover:bg-red-500/20 hover:text-red-400 px-2 py-1.5 rounded transition-colors"
+                      title="Excluir registro">
+                      🗑
+                    </button>
                   </div>
                 </div>
               </div>
@@ -506,7 +520,15 @@ export default function TradesPage() {
                     {t.pnl_usd != null ? `${t.pnl_usd >= 0 ? '+' : ''}$${fmtPrice(Math.abs(t.pnl_usd))}` : '—'}
                   </td>
                   <td className="px-4 py-3">
-                    <a href={`/review?trade=${t.id}`} className="text-xs text-emerald-400 hover:underline">Review</a>
+                    <div className="flex items-center gap-3">
+                      <a href={`/review?trade=${t.id}`} className="text-xs text-emerald-400 hover:underline">Review</a>
+                      <button
+                        onClick={() => setDeleting({ id: t.id, asset: t.asset })}
+                        className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                        title="Excluir registro">
+                        🗑
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -537,6 +559,29 @@ export default function TradesPage() {
                 Confirmar
               </button>
               <button onClick={() => setEditStop(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded-lg text-sm">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleting && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-red-500/30 rounded-xl p-6 w-80">
+            <h3 className="font-semibold mb-1 text-red-400">⚠ Excluir trade</h3>
+            <p className="text-sm text-gray-400 mb-5">
+              Tem certeza que quer excluir o registro de <b className="text-gray-100">{deleting.asset}</b>?
+              <br /><span className="text-xs text-gray-600 mt-1 block">Esta ação não pode ser desfeita.</span>
+            </p>
+            <div className="flex gap-3">
+              <button onClick={deleteTrade} disabled={loading}
+                className="flex-1 bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white font-semibold py-2 rounded-lg text-sm">
+                Excluir
+              </button>
+              <button onClick={() => setDeleting(null)}
                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded-lg text-sm">
                 Cancelar
               </button>
