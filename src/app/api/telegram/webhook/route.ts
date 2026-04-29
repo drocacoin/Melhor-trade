@@ -228,9 +228,15 @@ async function handleAdvisor() {
 
   try {
     const r = await fetch(`${appUrl}/api/advisor`, { method: 'POST' })
-    if (!r.ok) throw new Error(`status ${r.status}`)
 
-    const { analysis: a, context: ctx } = await r.json()
+    // Extrai o body mesmo em caso de erro para mostrar a causa real
+    const body = await r.json().catch(() => null)
+    if (!r.ok) {
+      const reason = body?.error ?? body?.details ?? `status ${r.status}`
+      throw new Error(reason)
+    }
+
+    const { analysis: a, context: ctx } = body
     if (!a) throw new Error('sem análise')
 
     const overallEmoji = a.overall === 'favorável' ? '🟢' : a.overall === 'desfavorável' ? '🔴' : '🟡'
