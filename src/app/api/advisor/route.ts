@@ -88,7 +88,15 @@ export async function POST() {
 
     const fgText = fg ? `${fg.value}/100 — ${fg.label}` : 'indisponível'
 
-    const scoresText = scores.slice(0, 8).map(s =>
+    // Top 8 por proximidade de sinal + sempre inclui macro-assets (OIL, SP500, MSTR)
+    const ALWAYS_SHOW = ['OIL', 'SP500', 'MSTR']
+    const top8 = scores.slice(0, 8)
+    const extra = scores.filter(s =>
+      ALWAYS_SHOW.includes(s.asset) && !top8.find(t => t.asset === s.asset)
+    )
+    const scoresForPrompt = [...top8, ...extra]
+
+    const scoresText = scoresForPrompt.map(s =>
       `${s.asset}: bull=${s.bullScore} bear=${s.bearScore} threshold=${s.threshold} ` +
       `(${s.gap <= 0 ? '🚨 SINAL' : `falta ${s.gap.toFixed(1)}pts`})`
     ).join('\n')

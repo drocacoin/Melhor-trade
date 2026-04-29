@@ -59,20 +59,7 @@ async function fetchCandlesHL(asset: string, timeframe: string): Promise<OHLCV[]
   }))
 }
 
-// ─── Yahoo Finance — OIL (BZ=F Brent), SP500 (SPY), MSTR ─────────────────────
-const YAHOO_SYMBOL: Record<string, string> = {
-  OIL:  'BZ=F',
-  SP500: 'SPY',
-  MSTR:  'MSTR',
-}
-
-const YAHOO_TF: Record<string, { interval: string; range: string }> = {
-  '1wk': { interval: '1wk', range: '2y'  },
-  '1d':  { interval: '1d',  range: '2y'  },
-  '4h':  { interval: '60m', range: '60d' },
-  '1h':  { interval: '60m', range: '30d' },
-}
-
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
   const result: OHLCV[] = []
   for (let i = 0; i + 3 < candles.length; i += 4) {
@@ -86,6 +73,66 @@ function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
     })
   }
   return result
+}
+
+// ─── Stooq — OIL/Brent (BZ.F) — mais confiável que Yahoo em servidores ────────
+// Yahoo Finance bloqueia IPs de Vercel/AWS frequentemente para futuros.
+// Stooq retorna CSV sem autenticação e raramente bloqueia.
+const STOOQ_SYMBOL: Record<string, string> = {
+  OIL: 'bz.f',   // Brent Crude Futures
+}
+
+const STOOQ_INTERVAL: Record<string, string> = {
+  '1wk': 'w',
+  '1d':  'd',
+  '4h':  'h',  // Stooq não tem 4h nativo — usamos hourly e agregamos
+  '1h':  'h',
+}
+
+async function fetchCandlesStooq(asset: string, timeframe: string): Promise<OHLCV[]> {
+  const symbol   = STOOQ_SYMBOL[asset]
+  const interval = STOOQ_INTERVAL[timeframe]
+
+  const url = `https://stooq.com/q/d/l/?s=${symbol}&i=${interval}`
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    next: { revalidate: 0 },
+  })
+
+  if (!res.ok) throw new Error(`Stooq error ${res.status} for ${asset}`)
+
+  const csv  = await res.text()
+  const rows = csv.trim().split('\n').slice(1) // remove header
+
+  const candles: OHLCV[] = rows
+    .map(row => {
+      const [, o, h, l, c, v] = row.split(',')
+      return {
+        open:   parseFloat(o),
+        high:   parseFloat(h),
+        low:    parseFloat(l),
+        close:  parseFloat(c),
+        volume: parseFloat(v ?? '0') || 0,
+      }
+    })
+    .filter(c => c.close > 0 && !isNaN(c.close))
+
+  if (candles.length < 10) throw new Error(`Stooq retornou poucos dados para ${asset}: ${candles.length} candles`)
+
+  return timeframe === '4h' ? aggregateTo4h(candles) : candles
+}
+
+// ─── Yahoo Finance — SP500 (SPY), MSTR ────────────────────────────────────────
+const YAHOO_SYMBOL: Record<string, string> = {
+  SP500: 'SPY',
+  MSTR:  'MSTR',
+}
+
+const YAHOO_TF: Record<string, { interval: string; range: string }> = {
+  '1wk': { interval: '1wk', range: '2y'  },
+  '1d':  { interval: '1d',  range: '2y'  },
+  '4h':  { interval: '60m', range: '60d' },
+  '1h':  { interval: '60m', range: '30d' },
 }
 
 async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLCV[]> {
@@ -120,6 +167,7 @@ async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLC
 // ─── Unified candle fetch ─────────────────────────────────────────────────────
 export async function fetchCandles(asset: string, timeframe: string): Promise<OHLCV[]> {
   if (HL_SYMBOL[asset])    return fetchCandlesHL(asset, timeframe)
+  if (STOOQ_SYMBOL[asset]) return fetchCandlesStooq(asset, timeframe)
   if (YAHOO_SYMBOL[asset]) return fetchCandlesYahoo(asset, timeframe)
   throw new Error(`Unknown asset: ${asset}`)
 }
@@ -143,7 +191,25 @@ export async function fetchLivePrice(asset: string): Promise<number> {
     }
   }
 
-  // Yahoo Finance — OIL, SP500, MSTR
+  // Stooq — OIL/Brent (mais confiável que Yahoo em servidores)
+  if (STOOQ_SYMBOL[asset]) {
+    try {
+      const symbol = STOOQ_SYMBOL[asset]
+      const res    = await fetch(
+        `https://stooq.com/q/d/l/?s=${symbol}&i=d`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' }, next: { revalidate: 300 } }
+      )
+      const csv  = await res.text()
+      const rows = csv.trim().split('\n').slice(1)
+      const last = rows[rows.length - 1]?.split(',')
+      const price = parseFloat(last?.[4] ?? '0') // índice 4 = close
+      return isNaN(price) ? 0 : Math.round(price * 100) / 100
+    } catch {
+      return 0
+    }
+  }
+
+  // Yahoo Finance — SP500, MSTR
   if (YAHOO_SYMBOL[asset]) {
     try {
       const symbol = YAHOO_SYMBOL[asset]
@@ -155,7 +221,7 @@ export async function fetchLivePrice(asset: string): Promise<number> {
       const closes = (json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []) as (number | null)[]
       const valid  = closes.filter((v): v is number => v != null)
       const raw    = valid[valid.length - 1] ?? 0
-      return Math.round(raw * 100) / 100  // arredonda para 2 casas decimais
+      return Math.round(raw * 100) / 100
     } catch {
       return 0
     }
