@@ -56,34 +56,39 @@ export async function GET(req: NextRequest) {
     .eq('status', 'active')
     .lt('detected_at', expiryCutoff)
 
-  // ── Scan — busca todos os timeframes de cada ativo em paralelo ───────────────
+  // ── Scan — busca candles em batches de 5 ativos (4 TFs cada = 20 fetches/batch) ──
   const results: Record<string, any> = {}
   const biases:  Record<string, string> = {}
   let newSignals = 0
 
-  // Fase 1: buscar candles de todos os ativos×timeframes em paralelo
-  // (60 fetches simultâneos em vez de sequenciais — reduz de ~3min para ~15s)
-  type TfResult = { tf: string; snap: any | null; err: string | null; count: number }
+  type TfResult   = { tf: string; snap: any | null; err: string | null; count: number }
   type AssetResult = { asset: Asset; tfs: TfResult[] }
 
-  const assetResults: AssetResult[] = await Promise.all(
-    ASSETS.map(async asset => {
-      const tfs = await Promise.all(
-        TIMEFRAMES.map(async tf => {
-          try {
-            const candles = await fetchCandles(asset, tf)
-            if (candles.length < 60) return { tf, snap: null, err: `only ${candles.length} candles`, count: candles.length }
-            const snap = computeSnapshot(candles)
-            return { tf, snap, err: null, count: candles.length }
-          } catch (e: any) {
-            console.error(`[scan] ${asset} ${tf}:`, e.message)
-            return { tf, snap: null, err: e.message, count: 0 }
-          }
-        })
-      )
-      return { asset, tfs }
-    })
-  )
+  async function scanAsset(asset: Asset): Promise<AssetResult> {
+    const tfs = await Promise.all(
+      TIMEFRAMES.map(async tf => {
+        try {
+          const candles = await fetchCandles(asset, tf)
+          if (candles.length < 60) return { tf, snap: null, err: `only ${candles.length} candles`, count: candles.length }
+          const snap = computeSnapshot(candles)
+          return { tf, snap, err: null, count: candles.length }
+        } catch (e: any) {
+          console.error(`[scan] ${asset} ${tf}:`, e.message)
+          return { tf, snap: null, err: e.message, count: 0 }
+        }
+      })
+    )
+    return { asset, tfs }
+  }
+
+  // Processa em batches de 5 ativos para não sobrecarregar conexões
+  const BATCH_SIZE = 5
+  const assetResults: AssetResult[] = []
+  for (let i = 0; i < ASSETS.length; i += BATCH_SIZE) {
+    const batch = ASSETS.slice(i, i + BATCH_SIZE)
+    const batchResults = await Promise.all(batch.map(scanAsset))
+    assetResults.push(...batchResults)
+  }
 
   // Fase 2: salvar snapshots no DB + detectar sinais (sequencial para não sobrecarregar DB)
   for (const { asset, tfs } of assetResults) {

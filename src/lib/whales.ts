@@ -12,13 +12,15 @@ const HL_INFO  = 'https://api.hyperliquid.xyz/info'
 // Leaderboard fica num endpoint de stats separado (não aceita no /info → 422)
 const HL_STATS = 'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard'
 
+const WHALE_TIMEOUT = 10_000  // 10s por chamada
+
 /** POST para /info (clearinghouseState, allMids, etc.) */
 async function hl(body: object) {
   const r = await fetch(HL_INFO, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
-    cache:   'no-store',
+    signal:  AbortSignal.timeout(WHALE_TIMEOUT),
   })
   if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
   return r.json()
@@ -29,7 +31,7 @@ async function hlLeaderboard() {
   const r = await fetch(HL_STATS, {
     method:  'GET',
     headers: { 'Content-Type': 'application/json' },
-    cache:   'no-store',
+    signal:  AbortSignal.timeout(WHALE_TIMEOUT),
   })
   if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
   return r.json()
