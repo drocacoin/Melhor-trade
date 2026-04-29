@@ -14,13 +14,19 @@ const HL_STATS = 'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard'
 
 const WHALE_TIMEOUT = 10_000  // 10s por chamada
 
+function fetchWT(url: string, opts: RequestInit = {}): Promise<Response> {
+  const abort = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`whale timeout: ${url.slice(0, 50)}`)), WHALE_TIMEOUT)
+  )
+  return Promise.race([fetch(url, opts), abort])
+}
+
 /** POST para /info (clearinghouseState, allMids, etc.) */
 async function hl(body: object) {
-  const r = await fetch(HL_INFO, {
+  const r = await fetchWT(HL_INFO, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
-    signal:  AbortSignal.timeout(WHALE_TIMEOUT),
   })
   if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
   return r.json()
@@ -28,10 +34,9 @@ async function hl(body: object) {
 
 /** GET para o leaderboard de stats */
 async function hlLeaderboard() {
-  const r = await fetch(HL_STATS, {
-    method:  'GET',
+  const r = await fetchWT(HL_STATS, {
+    method: 'GET',
     headers: { 'Content-Type': 'application/json' },
-    signal:  AbortSignal.timeout(WHALE_TIMEOUT),
   })
   if (!r.ok) throw new Error(`HyperLiquid ${r.status}`)
   return r.json()

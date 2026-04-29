@@ -184,8 +184,8 @@ async function handleTrades() {
 async function handleScan() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
 
-  // Dispara sem await — scan demora ~2 min e enviará o resumo sozinho via Telegram
-  fetch(`${appUrl}/api/cron/scan`, {
+  // send_summary=true garante que o scan sempre envia mensagem ao terminar
+  fetch(`${appUrl}/api/cron/scan?send_summary=true`, {
     headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
   }).catch(() => {/* silencioso */})
 

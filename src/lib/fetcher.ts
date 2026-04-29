@@ -3,8 +3,12 @@ import { OHLCV } from './indicators'
 // Timeout padrão para todas as chamadas externas — evita travamentos
 const FETCH_TIMEOUT = 12_000  // 12 segundos
 
-function withTimeout(ms: number): AbortSignal {
-  return AbortSignal.timeout(ms)
+// Promise.race garante timeout mesmo se AbortSignal não funcionar no ambiente
+function fetchWithTimeout(url: string, opts: RequestInit = {}): Promise<Response> {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`fetch timeout: ${url.slice(0, 60)}`)), FETCH_TIMEOUT)
+  )
+  return Promise.race([fetch(url, opts), timeoutPromise])
 }
 
 // ─── HyperLiquid DEX — free, no key, POST API ────────────────────────────────
@@ -40,11 +44,10 @@ async function fetchCandlesHL(asset: string, timeframe: string): Promise<OHLCV[]
   const now       = Date.now()
   const startTime = now - HL_LOOKBACK[timeframe]
 
-  const res = await fetch('https://api.hyperliquid.xyz/info', {
+  const res = await fetchWithTimeout('https://api.hyperliquid.xyz/info', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ type: 'candleSnapshot', req: { coin, interval, startTime, endTime: now } }),
-    signal:  withTimeout(FETCH_TIMEOUT),
   })
 
   const json: any[] = await res.json()
@@ -100,10 +103,7 @@ async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLC
   const { interval, range } = YAHOO_TF[timeframe]
 
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`
-  const res = await fetch(url, {
-    headers: YAHOO_HEADERS,
-    signal:  withTimeout(FETCH_TIMEOUT),
-  })
+  const res = await fetchWithTimeout(url, { headers: YAHOO_HEADERS })
   const json   = await res.json()
   const result = json?.chart?.result?.[0]
   if (!result) throw new Error(`Yahoo Finance error for ${asset} ${timeframe}: ${JSON.stringify(json?.chart?.error)}`)
@@ -135,11 +135,10 @@ export async function fetchCandles(asset: string, timeframe: string): Promise<OH
 export async function fetchLivePrice(asset: string): Promise<number> {
   if (HL_SYMBOL[asset]) {
     try {
-      const res  = await fetch('https://api.hyperliquid.xyz/info', {
+      const res  = await fetchWithTimeout('https://api.hyperliquid.xyz/info', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ type: 'allMids' }),
-        signal:  withTimeout(FETCH_TIMEOUT),
       })
       const mids: Record<string, string> = await res.json()
       return mids[HL_SYMBOL[asset]] ? parseFloat(mids[HL_SYMBOL[asset]]) : 0
@@ -148,9 +147,9 @@ export async function fetchLivePrice(asset: string): Promise<number> {
 
   if (YAHOO_SYMBOL[asset]) {
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(YAHOO_SYMBOL[asset])}?interval=1d&range=5d`,
-        { headers: YAHOO_HEADERS, signal: withTimeout(FETCH_TIMEOUT) }
+        { headers: YAHOO_HEADERS }
       )
       const json   = await res.json()
       const closes = (json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []) as (number | null)[]
@@ -173,9 +172,8 @@ export async function fetchFundingRate(asset: string): Promise<number | null> {
   const symbol = BYBIT_FUNDING_SYMBOL[asset]
   if (!symbol) return null
   try {
-    const res  = await fetch(
-      `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`,
-      { signal: withTimeout(FETCH_TIMEOUT) }
+    const res  = await fetchWithTimeout(
+      `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`
     )
     const json = await res.json()
     const item = json?.result?.list?.[0]
@@ -186,9 +184,7 @@ export async function fetchFundingRate(asset: string): Promise<number | null> {
 // ─── Fear & Greed Index ───────────────────────────────────────────────────────
 export async function fetchFearAndGreed(): Promise<{ value: number; label: string } | null> {
   try {
-    const res  = await fetch('https://api.alternative.me/fng/?limit=1', {
-      signal: withTimeout(FETCH_TIMEOUT),
-    })
+    const res  = await fetchWithTimeout('https://api.alternative.me/fng/?limit=1')
     const json = await res.json()
     const item = json?.data?.[0]
     if (!item) return null
