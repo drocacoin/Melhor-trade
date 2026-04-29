@@ -7,7 +7,7 @@ import { computeThreshold } from '@/lib/threshold'
 import { loadWeights } from '@/lib/weights'
 import { generateSignalAnalysis } from '@/lib/signal-analysis'
 import { fetchSetupHistory, checkCorrelation, suggestRisk, buildExitStrategy, buildConfluence } from '@/lib/signal-context'
-import { fetchWhaleSentiment, AssetSentiment } from '@/lib/whales'
+import { AssetSentiment } from '@/lib/whales'
 import { Asset } from '@/types'
 
 export const maxDuration = 300  // Vercel Pro — até 5 min por execução
@@ -27,13 +27,12 @@ export async function GET(req: NextRequest) {
   const db = supabaseAdmin()
 
   // ── Contexto global ────────────────────────────────────────────────────────
-  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }, whaleData] = await Promise.all([
+  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }] = await Promise.all([
     fetchFearAndGreed(),
     Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]))),
     db.from('performance_summary').select('*'),
     db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
     db.from('trades').select('*').eq('status', 'open'),
-    fetchWhaleSentiment().catch(() => null),  // não bloqueia o scan se HL estiver fora
   ])
 
   const fundingMap  = Object.fromEntries(fundings)
@@ -41,9 +40,8 @@ export async function GET(req: NextRequest) {
   for (const p of perfRows ?? []) perfMap[p.asset] = p
   const latestMacro = macroRow?.[0] ?? null
 
-  // Mapa de sentimento das baleias por ativo
+  // Whale map vazio no scan — baleias são carregadas só no advisor (HL é instável)
   const whaleMap: Record<string, AssetSentiment> = {}
-  for (const s of whaleData?.sentiment ?? []) whaleMap[s.asset] = s
 
   // Thresholds dinâmicos
   const thresholds: Record<string, ReturnType<typeof computeThreshold>> = {}
