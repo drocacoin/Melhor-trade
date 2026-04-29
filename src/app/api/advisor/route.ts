@@ -134,44 +134,55 @@ export async function POST() {
       (mj ? `\nMês ${mj.month}: WR ${mj.winrate}% | P&L $${mj.total_pnl}` : '')
 
     const prompt =
-      `Você é um analista sênior de swing trade quantitativo. Analise os dados e forneça recomendações específicas.\n\n` +
-      `━━ MACRO ━━\n${macroText}\n\n` +
-      `━━ FEAR & GREED ━━\n${fgText}\n\n` +
-      `━━ BALEIAS (top traders HyperLiquid por consistência) ━━\n${whaleText}\n\n` +
-      `━━ SCORES TÉCNICOS (top 8, ordenados por proximidade do sinal) ━━\n${scoresText}\n\n` +
-      `━━ POSIÇÕES ABERTAS ━━\n${openText}\n\n` +
-      `━━ SINAIS ATIVOS ━━\n${signalsText}\n\n` +
-      `━━ PERFORMANCE ━━\n${perfText}\n\n` +
-      `Seja direto. Priorize o que o trader deve FAZER AGORA.\n` +
-      `Considere correlação entre posições, risco total e regime macro.\n\n` +
-      `Responda APENAS com JSON válido, sem markdown, sem blocos de código:\n` +
-      `{"overall":"favorável","market_view":"...","opportunities":[{"asset":"X","direction":"long","urgency":"alta","score":7.5,"rationale":"..."}],"open_positions":[{"asset":"X","action":"manter","reason":"..."}],"risks":["..."],"recommendation":"..."}`
+      `Você é um analista sênior de swing trade quantitativo. Analise os dados abaixo.\n\n` +
+      `MACRO: ${macroText}\n\n` +
+      `FEAR&GREED: ${fgText}\n\n` +
+      `BALEIAS: ${whaleText}\n\n` +
+      `SCORES TÉCNICOS: ${scoresText}\n\n` +
+      `POSIÇÕES ABERTAS: ${openText}\n\n` +
+      `SINAIS ATIVOS: ${signalsText}\n\n` +
+      `PERFORMANCE: ${perfText}\n\n` +
+      `INSTRUÇÕES: Responda SOMENTE com um objeto JSON válido e compacto (sem markdown, sem texto fora do JSON, sem blocos de código). Use aspas duplas, sem trailing commas. Seja breve nos textos para não truncar.\n\n` +
+      `FORMATO OBRIGATÓRIO:\n` +
+      `{"overall":"favorável","market_view":"resumo em 1 frase","opportunities":[{"asset":"BTC","direction":"long","urgency":"alta","rationale":"motivo curto"}],"open_positions":[{"asset":"X","action":"manter","reason":"motivo"}],"risks":["risco1","risco2"],"recommendation":"ação principal"}`
 
     // ── 6. Chamar Claude Haiku ───────────────────────────────────────────────
     const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no Vercel — adicione em Settings → Environment Variables')
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada')
 
     const client = new Anthropic({ apiKey })
     const resp = await client.messages.create({
       model:      'claude-haiku-4-5',
-      max_tokens: 1200,
+      max_tokens: 2000,
       messages:   [{ role: 'user', content: prompt }],
     })
-    const raw = (resp.content[0] as any).text ?? ''
+    const raw = (resp.content[0] as any).text?.trim() ?? ''
 
-    // Extrair JSON da resposta (tolera markdown ```json ... ```)
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    // Extrai JSON — tenta o bloco mais externo {…}
+    let jsonStr = ''
+    const start = raw.indexOf('{')
+    const end   = raw.lastIndexOf('}')
+    if (start !== -1 && end !== -1 && end > start) {
+      jsonStr = raw.slice(start, end + 1)
+    }
+
+    if (!jsonStr) {
       console.error('[advisor] resposta sem JSON:', raw.slice(0, 300))
       return NextResponse.json({ error: 'IA não retornou JSON válido', raw: raw.slice(0, 500) }, { status: 500 })
     }
 
     let analysis: any
     try {
-      analysis = JSON.parse(jsonMatch[0])
-    } catch (e: any) {
-      console.error('[advisor] JSON parse error:', e.message, jsonMatch[0].slice(0, 300))
-      return NextResponse.json({ error: 'JSON inválido da IA', raw: jsonMatch[0].slice(0, 500) }, { status: 500 })
+      analysis = JSON.parse(jsonStr)
+    } catch {
+      // Tenta reparar JSON truncado — adiciona fechamento básico se necessário
+      try {
+        const repaired = jsonStr.replace(/,\s*$/, '') + '}'
+        analysis = JSON.parse(repaired)
+      } catch (e2: any) {
+        console.error('[advisor] JSON parse error:', e2.message, jsonStr.slice(0, 300))
+        return NextResponse.json({ error: 'JSON inválido da IA', raw: jsonStr.slice(0, 500) }, { status: 500 })
+      }
     }
 
     // ── 7. Retornar ─────────────────────────────────────────────────────────
