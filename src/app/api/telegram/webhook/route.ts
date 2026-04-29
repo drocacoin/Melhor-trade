@@ -243,28 +243,35 @@ async function handleAdvisor() {
     const urgEmoji = (u: string) => u === 'alta' ? '🔥' : u === 'média' ? '📌' : '💡'
 
     const opLines = (a.opportunities ?? []).slice(0, 3).map((op: any) =>
-      `${urgEmoji(op.urgency)} <b>${op.asset}</b> ${op.direction.toUpperCase()} — ${op.rationale.slice(0, 100)}`
+      `${urgEmoji(op.urgency)} <b>${op.asset}</b> ${op.direction.toUpperCase()} — ${(op.rationale ?? '').slice(0, 120)}`
     ).join('\n')
 
     const posLines = (a.open_positions ?? []).map((p: any) =>
-      `${p.action === 'fechar' ? '✗' : p.action === 'manter' ? '✓' : '↑'} <b>${p.asset}</b>: ${p.reason.slice(0, 80)}`
+      `${p.action === 'fechar' ? '✗' : p.action === 'manter' ? '✓' : '↑'} <b>${p.asset}</b>: ${(p.reason ?? '').slice(0, 100)}`
     ).join('\n')
 
     const riskLines = (a.risks ?? []).slice(0, 2).map((r: string) =>
-      `⚠ ${r.slice(0, 100)}`
+      `⚠ ${(r ?? '').slice(0, 120)}`
     ).join('\n')
 
     let msg =
       `✦ <b>Análise Completa — Melhor Trade</b>\n\n` +
       `${overallEmoji} Mercado: <b>${a.overall.toUpperCase()}</b>\n` +
-      `<i>${a.market_view}</i>\n\n`
+      `<i>${(a.market_view ?? '').slice(0, 200)}</i>\n\n`
 
-    if (opLines) msg += `📊 <b>Oportunidades:</b>\n${opLines}\n\n`
-    if (posLines) msg += `📋 <b>Posições abertas:</b>\n${posLines}\n\n`
-    if (riskLines) msg += `⚠ <b>Riscos:</b>\n${riskLines}\n\n`
-    if (a.recommendation) msg += `💡 <b>Recomendação:</b>\n${a.recommendation}`
+    if (opLines)         msg += `📊 <b>Oportunidades:</b>\n${opLines}\n\n`
+    if (posLines)        msg += `📋 <b>Posições abertas:</b>\n${posLines}\n\n`
+    if (riskLines)       msg += `⚠ <b>Riscos:</b>\n${riskLines}\n\n`
+    if (a.recommendation) msg += `💡 <b>Recomendação:</b>\n${(a.recommendation ?? '').slice(0, 400)}`
 
-    await sendTelegram(msg)
+    // Telegram limite: 4096 chars. Divide em 2 mensagens se necessário
+    if (msg.length > 3800) {
+      const mid = msg.lastIndexOf('\n\n', 3800)
+      await sendTelegram(msg.slice(0, mid))
+      await sendTelegram(msg.slice(mid).trim())
+    } else {
+      await sendTelegram(msg)
+    }
   } catch (e: any) {
     await sendTelegram(`❌ <b>Erro na análise:</b> ${e.message}\n\nTente novamente em instantes.`)
   }
