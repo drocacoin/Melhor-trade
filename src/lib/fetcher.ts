@@ -1,7 +1,13 @@
 import { OHLCV } from './indicators'
 
-// ─── HyperLiquid DEX — free, no key, POST API ─────────────────────────────────
-// Covers: BTC ETH SOL HYPE AAVE LINK AVAX GOLD(PAXG)
+// Timeout padrão para todas as chamadas externas — evita travamentos
+const FETCH_TIMEOUT = 12_000  // 12 segundos
+
+function withTimeout(ms: number): AbortSignal {
+  return AbortSignal.timeout(ms)
+}
+
+// ─── HyperLiquid DEX — free, no key, POST API ────────────────────────────────
 const HL_SYMBOL: Record<string, string> = {
   BTC:  'BTC',
   ETH:  'ETH',
@@ -10,25 +16,22 @@ const HL_SYMBOL: Record<string, string> = {
   AAVE: 'AAVE',
   LINK: 'LINK',
   AVAX: 'AVAX',
-  GOLD: 'PAXG',  // PAX Gold — 1 PAXG = 1 troy oz gold
+  GOLD: 'PAXG',
   XRP:  'XRP',
   SUI:  'SUI',
   DOGE: 'DOGE',
-  TAO:  'TAO',   // Bittensor — decentralized AI
+  TAO:  'TAO',
 }
 
 const HL_INTERVAL: Record<string, string> = {
-  '1wk': '1w',
-  '1d':  '1d',
-  '4h':  '4h',
-  '1h':  '1h',
+  '1wk': '1w', '1d': '1d', '4h': '4h', '1h': '1h',
 }
 
 const HL_LOOKBACK: Record<string, number> = {
   '1wk': 2 * 365 * 24 * 3600 * 1000,
   '1d':  2 * 365 * 24 * 3600 * 1000,
-  '4h':  60  * 24 * 3600 * 1000,
-  '1h':  30  * 24 * 3600 * 1000,
+  '4h':  60 * 24 * 3600 * 1000,
+  '1h':  30 * 24 * 3600 * 1000,
 }
 
 async function fetchCandlesHL(asset: string, timeframe: string): Promise<OHLCV[]> {
@@ -38,13 +41,10 @@ async function fetchCandlesHL(asset: string, timeframe: string): Promise<OHLCV[]
   const startTime = now - HL_LOOKBACK[timeframe]
 
   const res = await fetch('https://api.hyperliquid.xyz/info', {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'candleSnapshot',
-      req: { coin, interval, startTime, endTime: now },
-    }),
-    next: { revalidate: 0 },
+    body:    JSON.stringify({ type: 'candleSnapshot', req: { coin, interval, startTime, endTime: now } }),
+    signal:  withTimeout(FETCH_TIMEOUT),
   })
 
   const json: any[] = await res.json()
@@ -59,7 +59,7 @@ async function fetchCandlesHL(asset: string, timeframe: string): Promise<OHLCV[]
   }))
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
   const result: OHLCV[] = []
   for (let i = 0; i + 3 < candles.length; i += 4) {
@@ -75,10 +75,10 @@ function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
   return result
 }
 
-// ─── Yahoo Finance — OIL (BZ=F Brent), SP500 (SPY), MSTR ─────────────────────
-// Usar query2 (não query1) — query1 bloqueia IPs de servidor, query2 não.
+// ─── Yahoo Finance — OIL (BZ=F), SP500 (SPY), MSTR ──────────────────────────
+// query2 funciona de servidores — query1 bloqueia IPs de cloud.
 const YAHOO_SYMBOL: Record<string, string> = {
-  OIL:   'BZ=F',   // Brent Crude Futures
+  OIL:   'BZ=F',
   SP500: 'SPY',
   MSTR:  'MSTR',
 }
@@ -90,22 +90,23 @@ const YAHOO_TF: Record<string, { interval: string; range: string }> = {
   '1h':  { interval: '60m', range: '30d' },
 }
 
+const YAHOO_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept':     'application/json',
+}
+
 async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLCV[]> {
   const symbol              = YAHOO_SYMBOL[asset]
   const { interval, range } = YAHOO_TF[timeframe]
 
-  // query2 é mais tolerante com IPs de servidor que query1
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`
   const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-    },
-    next: { revalidate: 0 },
+    headers: YAHOO_HEADERS,
+    signal:  withTimeout(FETCH_TIMEOUT),
   })
-  const json = await res.json()
+  const json   = await res.json()
   const result = json?.chart?.result?.[0]
-  if (!result) throw new Error(`Yahoo Finance error for ${asset} ${timeframe}`)
+  if (!result) throw new Error(`Yahoo Finance error for ${asset} ${timeframe}: ${JSON.stringify(json?.chart?.error)}`)
 
   const timestamps: number[] = result.timestamp ?? []
   const q = result.indicators.quote[0]
@@ -132,63 +133,40 @@ export async function fetchCandles(asset: string, timeframe: string): Promise<OH
 
 // ─── Live price ───────────────────────────────────────────────────────────────
 export async function fetchLivePrice(asset: string): Promise<number> {
-  // HyperLiquid — 8 ativos (crypto + GOLD/PAXG) via allMids (1 req para todos)
   if (HL_SYMBOL[asset]) {
     try {
-      const res = await fetch('https://api.hyperliquid.xyz/info', {
-        method: 'POST',
+      const res  = await fetch('https://api.hyperliquid.xyz/info', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'allMids' }),
-        cache: 'no-store',
+        body:    JSON.stringify({ type: 'allMids' }),
+        signal:  withTimeout(FETCH_TIMEOUT),
       })
       const mids: Record<string, string> = await res.json()
-      const coin = HL_SYMBOL[asset]
-      return mids[coin] ? parseFloat(mids[coin]) : 0
-    } catch {
-      return 0
-    }
+      return mids[HL_SYMBOL[asset]] ? parseFloat(mids[HL_SYMBOL[asset]]) : 0
+    } catch { return 0 }
   }
 
-  // Yahoo Finance — OIL, SP500, MSTR (query2 funciona de servidores)
   if (YAHOO_SYMBOL[asset]) {
     try {
-      const symbol = YAHOO_SYMBOL[asset]
-      const res    = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-          },
-          next: { revalidate: 60 },
-        }
+      const res = await fetch(
+        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(YAHOO_SYMBOL[asset])}?interval=1d&range=5d`,
+        { headers: YAHOO_HEADERS, signal: withTimeout(FETCH_TIMEOUT) }
       )
       const json   = await res.json()
       const closes = (json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? []) as (number | null)[]
       const valid  = closes.filter((v): v is number => v != null)
-      const raw    = valid[valid.length - 1] ?? 0
-      return Math.round(raw * 100) / 100
-    } catch {
-      return 0
-    }
+      return valid.length ? Math.round((valid[valid.length - 1]) * 100) / 100 : 0
+    } catch { return 0 }
   }
 
   return 0
 }
 
-// ─── Funding rate via Bybit (crypto perpetuals) — free, no key ───────────────
+// ─── Funding rate via Bybit ───────────────────────────────────────────────────
 const BYBIT_FUNDING_SYMBOL: Record<string, string> = {
-  BTC:  'BTCUSDT',
-  ETH:  'ETHUSDT',
-  SOL:  'SOLUSDT',
-  HYPE: 'HYPEUSDT',
-  AAVE: 'AAVEUSDT',
-  LINK: 'LINKUSDT',
-  AVAX: 'AVAXUSDT',
-  XRP:  'XRPUSDT',
-  SUI:  'SUIUSDT',
-  DOGE: 'DOGEUSDT',
-  TAO:  'TAOUSDT',
+  BTC: 'BTCUSDT', ETH: 'ETHUSDT', SOL: 'SOLUSDT', HYPE: 'HYPEUSDT',
+  AAVE: 'AAVEUSDT', LINK: 'LINKUSDT', AVAX: 'AVAXUSDT',
+  XRP: 'XRPUSDT', SUI: 'SUIUSDT', DOGE: 'DOGEUSDT', TAO: 'TAOUSDT',
 }
 
 export async function fetchFundingRate(asset: string): Promise<number | null> {
@@ -197,25 +175,23 @@ export async function fetchFundingRate(asset: string): Promise<number | null> {
   try {
     const res  = await fetch(
       `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`,
-      { next: { revalidate: 300 } }
+      { signal: withTimeout(FETCH_TIMEOUT) }
     )
     const json = await res.json()
     const item = json?.result?.list?.[0]
     return item?.fundingRate ? parseFloat(item.fundingRate) : null
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
-// ─── Fear & Greed Index (alternative.me — free, no key) ──────────────────────
+// ─── Fear & Greed Index ───────────────────────────────────────────────────────
 export async function fetchFearAndGreed(): Promise<{ value: number; label: string } | null> {
   try {
-    const res  = await fetch('https://api.alternative.me/fng/?limit=1', { next: { revalidate: 3600 } })
+    const res  = await fetch('https://api.alternative.me/fng/?limit=1', {
+      signal: withTimeout(FETCH_TIMEOUT),
+    })
     const json = await res.json()
     const item = json?.data?.[0]
     if (!item) return null
     return { value: parseInt(item.value), label: item.value_classification }
-  } catch {
-    return null
-  }
+  } catch { return null }
 }

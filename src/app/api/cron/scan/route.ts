@@ -56,29 +56,47 @@ export async function GET(req: NextRequest) {
     .eq('status', 'active')
     .lt('detected_at', expiryCutoff)
 
-  // ── Scan ──────────────────────────────────────────────────────────────────
+  // ── Scan — busca todos os timeframes de cada ativo em paralelo ───────────────
   const results: Record<string, any> = {}
   const biases:  Record<string, string> = {}
   let newSignals = 0
 
-  for (const asset of ASSETS) {
+  // Fase 1: buscar candles de todos os ativos×timeframes em paralelo
+  // (60 fetches simultâneos em vez de sequenciais — reduz de ~3min para ~15s)
+  type TfResult = { tf: string; snap: any | null; err: string | null; count: number }
+  type AssetResult = { asset: Asset; tfs: TfResult[] }
+
+  const assetResults: AssetResult[] = await Promise.all(
+    ASSETS.map(async asset => {
+      const tfs = await Promise.all(
+        TIMEFRAMES.map(async tf => {
+          try {
+            const candles = await fetchCandles(asset, tf)
+            if (candles.length < 60) return { tf, snap: null, err: `only ${candles.length} candles`, count: candles.length }
+            const snap = computeSnapshot(candles)
+            return { tf, snap, err: null, count: candles.length }
+          } catch (e: any) {
+            console.error(`[scan] ${asset} ${tf}:`, e.message)
+            return { tf, snap: null, err: e.message, count: 0 }
+          }
+        })
+      )
+      return { asset, tfs }
+    })
+  )
+
+  // Fase 2: salvar snapshots no DB + detectar sinais (sequencial para não sobrecarregar DB)
+  for (const { asset, tfs } of assetResults) {
     results[asset] = { threshold: thresholds[asset] }
     const snapshots: Record<string, any> = {}
 
-    for (const tf of TIMEFRAMES) {
-      try {
-        const candles = await fetchCandles(asset, tf)
-        if (candles.length < 60) {
-          results[asset][tf] = `only ${candles.length} candles`
-        } else {
-          const snap = computeSnapshot(candles)
-          snapshots[tf] = snap
-          results[asset][tf] = { close: snap.close, bias: snap.bias }
-          await db.from('snapshots').insert({ asset, timeframe: tf, ...snap })
-        }
-      } catch (e: any) {
-        console.error(`[scan] ${asset} ${tf}:`, e.message)
-        results[asset][tf] = `ERROR: ${e.message}`
+    for (const { tf, snap, err, count } of tfs) {
+      if (snap) {
+        snapshots[tf] = snap
+        results[asset][tf] = { close: snap.close, bias: snap.bias }
+        await db.from('snapshots').insert({ asset, timeframe: tf, ...snap })
+      } else {
+        results[asset][tf] = err ?? `only ${count} candles`
       }
     }
 
@@ -90,7 +108,6 @@ export async function GET(req: NextRequest) {
     const signal  = detectSignal(asset, snapshots, fg, threshold, weights, latestMacro, whaleMap)
 
     if (signal) {
-      // Enriquecer com contexto
       const whale = whaleMap[asset]
       const [history, exitStrategy, confluence] = await Promise.all([
         fetchSetupHistory(db, asset, signal.direction),
@@ -104,7 +121,6 @@ export async function GET(req: NextRequest) {
       const enriched = {
         ...signal,
         history, exitStrategy, confluence, correlation, riskSuggest,
-        // Contexto das baleias (não vai ao DB, só ao Telegram)
         whale_sentiment: whale?.sentiment ?? null,
         whale_pct:       whale?.sentimentPct ?? null,
         whale_count:     whale ? whale.longCount + whale.shortCount : 0,
@@ -113,8 +129,6 @@ export async function GET(req: NextRequest) {
       const { data } = await db.from('signals').insert(signal).select().single()
       if (data) {
         newSignals++
-
-        // Auto-análise Haiku
         let analysis = ''
         try {
           analysis = await generateSignalAnalysis(data, snapshots, latestMacro, fg, 'haiku')
@@ -122,7 +136,6 @@ export async function GET(req: NextRequest) {
         } catch (e: any) {
           console.error(`[scan] análise ${asset}:`, e.message)
         }
-
         await sendTelegram(fmtSignal({ ...enriched, analysis }, fg, fundingMap[asset] ?? null))
         results[asset].signal = { ...data, analysis }
       }
