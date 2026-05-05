@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
 import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
+import { logEvent, wasCbLoggedRecently } from '@/lib/logger'
 import { computeThreshold } from '@/lib/threshold'
 import { loadWeights } from '@/lib/weights'
 import { generateSignalAnalysis } from '@/lib/signal-analysis'
@@ -45,7 +46,18 @@ export async function GET(req: NextRequest) {
 
   // ── Circuit breaker — pausa sinais em sequência de perdas ──────────────────
   const cb = evaluateCircuitBreaker(recentClosed ?? [])
-  if (cb.triggered) console.warn('[scan] Circuit breaker ativo:', cb.reason)
+  if (cb.triggered) {
+    // Loga no banco no máximo a cada 4h para não duplicar
+    const alreadyLogged = await wasCbLoggedRecently(4)
+    if (!alreadyLogged) {
+      await logEvent('circuit_breaker_triggered', {
+        reason:   cb.reason,
+        last5wr:  cb.last5wr,
+        last10wr: cb.last10wr,
+        trades_checked: (recentClosed ?? []).length,
+      })
+    }
+  }
 
   // Whale map vazio no scan — baleias são carregadas só no advisor (HL é instável)
   const whaleMap: Record<string, AssetSentiment> = {}

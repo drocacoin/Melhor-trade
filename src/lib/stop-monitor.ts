@@ -13,6 +13,7 @@
 import { fetchLivePrice } from '@/lib/fetcher'
 import { sendTelegram, fmtStopAlert } from '@/lib/telegram'
 import { supabaseAdmin } from '@/lib/supabase'
+import { logEvent } from '@/lib/logger'
 import { Asset } from '@/types'
 
 export async function checkStopAlerts(
@@ -64,6 +65,18 @@ export async function checkStopAlerts(
           notes:       `[AUTO] Stop atingido @ $${price.toFixed(2)}`,
         }).eq('id', trade.id).eq('status', 'open')
 
+        // Log persistido no banco
+        await logEvent('stop_auto_closed', {
+          trade_id:    trade.id,
+          direction:   trade.direction,
+          leverage:    lev,
+          entry_price: entry,
+          stop_price:  stop,
+          close_price: price,
+          pnl_pct:     +pnlPct.toFixed(2),
+          pnl_usd:     pnlUsd,
+        }, trade.asset)
+
         const pnlStr =
           `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%` +
           (pnlUsd !== null ? ` ($${pnlUsd >= 0 ? '+' : ''}${pnlUsd.toFixed(0)})` : '')
@@ -104,6 +117,15 @@ export async function checkStopAlerts(
           stop_price:      entry,   // trailing stop → breakeven
           notes:           `[AUTO] Stop movido para breakeven $${entry} ao atingir alvo 1`,
         }).eq('id', trade.id)
+
+        await logEvent('trailing_stop_moved', {
+          trade_id:  trade.id,
+          direction: trade.direction,
+          old_stop:  stop,
+          new_stop:  entry,
+          target1:   trade.target1,
+          price_at_target: price,
+        }, trade.asset)
 
         await sendTelegram(
           `🎯 <b>ALVO 1 ATINGIDO — ${trade.asset}</b>\n\n` +
