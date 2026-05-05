@@ -2,17 +2,23 @@
  * Webhook Telegram — recebe comandos e responde.
  *
  * Comandos disponíveis:
- *  /status  — regime macro + fear & greed + score dos ativos
- *  /trades  — posições abertas com P&L atual
- *  /scan    — dispara scan manual
- *  /macro   — atualiza macro agora
- *  /help    — lista comandos
+ *  /status    — regime macro + fear & greed + score dos ativos
+ *  /trades    — posições abertas com P&L atual
+ *  /scan      — dispara scan manual
+ *  /scanfast  — dispara scan rápido agora
+ *  /macro     — atualiza macro agora
+ *  /journal   — resumo IA do mês
+ *  /analisar  — análise completa
+ *  /baleias   — sentimento top traders HL
+ *  /noticias  — notícias ao vivo com sentimento por ativo
+ *  /help      — lista comandos
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
 import { fetchLivePrice, fetchFearAndGreed } from '@/lib/fetcher'
 import { fetchWhaleSentiment } from '@/lib/whales'
+import { fetchNewsSentiment } from '@/lib/news'
 import { Asset } from '@/types'
 
 export const maxDuration = 60
@@ -43,14 +49,16 @@ export async function POST(req: NextRequest) {
     await sendTelegram(
       `🤖 <b>Melhor Trade Bot</b>\n\n` +
       `Comandos disponíveis:\n\n` +
-      `/status   — Macro + Fear &amp; Greed atual\n` +
-      `/trades   — Posições abertas com P&amp;L\n` +
-      `/scan     — Dispara scan manual agora\n` +
-      `/macro    — Atualiza leitura macro agora\n` +
-      `/journal  — Resumo IA do mês atual\n` +
-      `/analisar — Análise completa + recomendação\n` +
-      `/baleias  — Sentimento dos top traders HL\n` +
-      `/help     — Esta mensagem`
+      `/status    — Macro + Fear &amp; Greed atual\n` +
+      `/trades    — Posições abertas com P&amp;L\n` +
+      `/scan      — Scan completo (todos os ativos)\n` +
+      `/scanfast  — Scan rápido agora (crypto, 30s)\n` +
+      `/noticias  — Notícias ao vivo + sentimento\n` +
+      `/macro     — Atualiza leitura macro agora\n` +
+      `/journal   — Resumo IA do mês atual\n` +
+      `/analisar  — Análise completa + recomendação\n` +
+      `/baleias   — Sentimento dos top traders HL\n` +
+      `/help      — Esta mensagem`
     )
     return NextResponse.json({ ok: true })
   }
@@ -87,6 +95,16 @@ export async function POST(req: NextRequest) {
 
   if (text === '/baleias') {
     await handleWhales()
+    return NextResponse.json({ ok: true })
+  }
+
+  if (text === '/noticias') {
+    await handleNews()
+    return NextResponse.json({ ok: true })
+  }
+
+  if (text === '/scanfast') {
+    await handleScanFast()
     return NextResponse.json({ ok: true })
   }
 
@@ -304,4 +322,70 @@ async function handleWhales() {
   } catch (e: any) {
     await sendTelegram(`❌ <b>Erro ao buscar baleias:</b> ${e.message}`)
   }
+}
+
+async function handleNews() {
+  await sendTelegram(`📰 <b>Buscando notícias...</b>\n\n<i>CoinTelegraph, Decrypt, CoinDesk, BitcoinMag. Aguarde.</i>`)
+
+  try {
+    const { byAsset, total, items } = await fetchNewsSentiment()
+
+    if (!total) {
+      await sendTelegram(`📰 <b>Notícias</b>\n\nNenhuma notícia encontrada nas últimas 12h.`)
+      return
+    }
+
+    const sorted = Object.values(byAsset).sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+    const bullishAssets = sorted.filter(a => a.sentiment === 'bullish')
+    const bearishAssets = sorted.filter(a => a.sentiment === 'bearish')
+
+    let msg = `📰 <b>Notícias — Últimas 12h</b>\n`
+    msg += `<i>${total} notícias de ${[...new Set(items.map(i => i.source))].join(', ')}</i>\n\n`
+
+    if (bullishAssets.length) {
+      msg += `🟢 <b>Sentimento Bullish:</b>\n`
+      msg += bullishAssets.slice(0, 5).map(a =>
+        `   <b>${a.asset}</b> (score +${a.score}, ${a.count} notícias)\n` +
+        `   <i>"${a.headlines[0]?.slice(0, 80) ?? ''}"</i>`
+      ).join('\n') + '\n\n'
+    }
+
+    if (bearishAssets.length) {
+      msg += `🔴 <b>Sentimento Bearish:</b>\n`
+      msg += bearishAssets.slice(0, 5).map(a =>
+        `   <b>${a.asset}</b> (score ${a.score}, ${a.count} notícias)\n` +
+        `   <i>"${a.headlines[0]?.slice(0, 80) ?? ''}"</i>`
+      ).join('\n') + '\n\n'
+    }
+
+    // Últimas 3 manchetes gerais
+    msg += `🔖 <b>Manchetes recentes:</b>\n`
+    msg += items.slice(0, 3).map(h =>
+      `   <i>"${h.title.slice(0, 100)}"</i> — ${h.source}`
+    ).join('\n')
+
+    if (msg.length > 3800) {
+      const mid = msg.lastIndexOf('\n\n', 3800)
+      await sendTelegram(msg.slice(0, mid))
+      await sendTelegram(msg.slice(mid).trim())
+    } else {
+      await sendTelegram(msg)
+    }
+  } catch (e: any) {
+    await sendTelegram(`❌ <b>Erro ao buscar notícias:</b> ${e.message}`)
+  }
+}
+
+async function handleScanFast() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://melhor-trade.vercel.app'
+
+  // Dispara sem await — scan envia o próprio Telegram ao terminar
+  fetch(`${appUrl}/api/cron/scan-fast`, {
+    headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
+  }).catch(() => {/* silencioso */})
+
+  await sendTelegram(
+    `⚡ <b>Scan rápido iniciado</b>\n\n` +
+    `<i>Verificando crypto (BTC/ETH/SOL/HYPE + 7 altcoins) com notícias e baleias. Resultado em ~30s.</i>`
+  )
 }

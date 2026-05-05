@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/scan-fast",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/cron/macro",
       "schedule": "0 8 * * *"
     },

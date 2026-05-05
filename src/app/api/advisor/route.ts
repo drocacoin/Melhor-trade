@@ -11,6 +11,7 @@ import { fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
 import { computeLiveScore } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { fetchWhaleSentiment } from '@/lib/whales'
+import { fetchNewsSentiment } from '@/lib/news'
 import Anthropic from '@anthropic-ai/sdk'
 import { Asset } from '@/types'
 
@@ -33,6 +34,7 @@ export async function POST() {
       { data: perfRows },
       { data: monthlyJournal },
       whaleSentiment,
+      newsResult,
     ] = await Promise.all([
       fetchFearAndGreed().catch(() => null),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
@@ -43,6 +45,7 @@ export async function POST() {
       db.from('performance_summary').select('*'),
       db.from('monthly_journals').select('*').order('month', { ascending: false }).limit(1),
       fetchWhaleSentiment().catch(() => null),
+      fetchNewsSentiment().catch(() => null),
     ])
 
     const macro   = macroRow?.[0] ?? null
@@ -128,6 +131,17 @@ export async function POST() {
           ).join('\n')
       : 'Dados de baleias indisponíveis.'
 
+    // Sentimento de notícias (últimas 12h)
+    const newsText = newsResult?.byAsset && Object.keys(newsResult.byAsset).length
+      ? Object.values(newsResult.byAsset)
+          .filter((n: any) => n.count >= 2)
+          .sort((a: any, b: any) => Math.abs(b.score) - Math.abs(a.score))
+          .slice(0, 8)
+          .map((n: any) =>
+            `${n.asset}: ${n.sentiment.toUpperCase()} score=${n.score > 0 ? '+' : ''}${n.score} (${n.count} notícias) | "${(n.headlines[0] ?? '').slice(0, 80)}"`
+          ).join('\n')
+      : 'Sem dados de notícias disponíveis.'
+
     const mj = (monthlyJournal as any)?.[0]
     const perfText =
       `Últimos ${closed.length} trades: WR ${winrate.toFixed(1)}% (${wins}W/${closed.length - wins}L) | P&L $${totalPnl.toFixed(2)}` +
@@ -137,6 +151,7 @@ export async function POST() {
       `Você é um analista sênior de swing trade quantitativo. Analise os dados abaixo.\n\n` +
       `MACRO: ${macroText}\n\n` +
       `FEAR&GREED: ${fgText}\n\n` +
+      `NOTICIAS (últimas 12h): ${newsText}\n\n` +
       `BALEIAS: ${whaleText}\n\n` +
       `SCORES TÉCNICOS: ${scoresText}\n\n` +
       `POSIÇÕES ABERTAS: ${openText}\n\n` +
