@@ -183,18 +183,30 @@ export async function GET(req: NextRequest) {
       news: newsAsset?.sentiment ?? '—', whale: whale?.sentiment ?? '—',
     }
 
+    // Helpers de display
+    const influencerSources = ['@marioNawfal', '@CoinBureau', '@WatcherGuru']
+    const hasInfluencer = (n: any) => n?.sources?.some((s: string) => influencerSources.includes(s))
+    const influencerTag = (n: any) => {
+      const names = (n?.sources ?? []).filter((s: string) => influencerSources.includes(s))
+      return names.length ? ` ✦${names.join('+')}` : ''
+    }
+    const priceStr = `$${snap4h.close.toFixed(asset === 'DOGE' ? 5 : asset === 'XRP' || asset === 'AVAX' ? 3 : 2)}`
+
     // ── Tipo 1: SINAL (score ≥ threshold) ───────────────────────────────────
     if (topScore >= threshold && !alreadyActive.has(asset)) {
-      const newsTag = newsAsset ? ` | 📰 ${newsAsset.sentiment}` : ''
-      const whaleTag = whale ? ` | 🐳 ${whale.sentiment}` : ''
+      const newsTag   = newsAsset ? ` | 📰 ${newsAsset.sentiment}${influencerTag(newsAsset)}` : ''
+      const whaleTag  = whale ? ` | 🐳 ${whale.sentiment}` : ''
+      const tweetLine = newsAsset?.tweetCount
+        ? `\n🐦 ${newsAsset.tweetCount} tweet(s): <i>${(newsAsset.headlines[0] ?? '').slice(0, 90)}</i>`
+        : ''
       alertBucket.push({
         asset, dir, type: 'signal', score: topScore, gap,
         text:
           `${dir === 'long' ? '🟢' : '🔴'} <b>${asset}</b> ${dir.toUpperCase()}\n` +
           `Score: <b>${topScore.toFixed(1)}</b>/${threshold}${newsTag}${whaleTag}\n` +
-          `Preço: <code>$${snap4h.close.toFixed(asset === 'DOGE' ? 5 : 2)}</code>`,
+          `Preço: <code>${priceStr}</code>${tweetLine}`,
       })
-      alreadyActive.add(asset)  // previne duplo alerta no mesmo loop
+      alreadyActive.add(asset)
       continue
     }
 
@@ -205,30 +217,34 @@ export async function GET(req: NextRequest) {
 
       if (newsOk || whaleOk) {
         const confirms = [
-          newsOk  && `📰 news ${newsAsset!.sentiment}`,
+          newsOk  && `📰 news ${newsAsset!.sentiment}${influencerTag(newsAsset)}`,
           whaleOk && `🐳 baleias ${whale.sentiment}`,
         ].filter(Boolean).join(' + ')
+
+        const influencerLine = newsOk && hasInfluencer(newsAsset)
+          ? `\n🐦 <i>${(newsAsset!.headlines[0] ?? '').slice(0, 100)}</i>`
+          : newsOk && newsAsset?.headlines?.[0]
+            ? `\n<i>${newsAsset.headlines[0].slice(0, 100)}</i>`
+            : ''
 
         alertBucket.push({
           asset, dir, type: 'forming', score: topScore, gap,
           text:
-            `⏳ <b>${asset}</b> ${dir.toUpperCase()} — falta ${gap.toFixed(1)} pt(s)\n` +
-            `${confirms}\n` +
-            (newsAsset?.headlines?.[0]
-              ? `<i>"${newsAsset.headlines[0].slice(0, 100)}"</i>`
-              : ''),
+            `⏳ <b>${asset}</b> ${dir.toUpperCase()} — falta ${gap.toFixed(1)} pt(s) | ${priceStr}\n` +
+            `${confirms}${influencerLine}`,
         })
       }
     }
 
     // ── Tipo 3: NEWS FLASH (notícia forte + setup parcial, ≥50% do threshold) ─
     if (gap > 1.5 && newsAsset && Math.abs(newsAsset.score) >= 1.5 && topScore >= threshold * 0.5 && newsDir === dir) {
+      const iTag = influencerTag(newsAsset)
       alertBucket.push({
         asset, dir, type: 'news', score: topScore, gap,
         text:
-          `📰 <b>${asset}</b> ${dir.toUpperCase()} — notícia forte (score ${newsAsset.score > 0 ? '+' : ''}${newsAsset.score})\n` +
-          `Setup técnico: ${topScore.toFixed(1)}/${threshold} | gap: ${gap.toFixed(1)}\n` +
-          `<i>"${newsAsset.headlines[0]?.slice(0, 120) ?? ''}"</i>`,
+          `📰 <b>${asset}</b> ${dir.toUpperCase()}${iTag} — score ${newsAsset.score > 0 ? '+' : ''}${newsAsset.score}\n` +
+          `Setup: ${topScore.toFixed(1)}/${threshold} (falta ${gap.toFixed(1)} pt) | ${priceStr}\n` +
+          `<i>${(newsAsset.headlines[0] ?? '').slice(0, 120)}</i>`,
       })
     }
   }

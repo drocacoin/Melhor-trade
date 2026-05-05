@@ -328,41 +328,58 @@ async function handleNews() {
   await sendTelegram(`📰 <b>Buscando notícias...</b>\n\n<i>CoinTelegraph, Decrypt, CoinDesk, BitcoinMag. Aguarde.</i>`)
 
   try {
-    const { byAsset, total, items } = await fetchNewsSentiment()
+    const { byAsset, total, items, sources } = await fetchNewsSentiment()
 
     if (!total) {
       await sendTelegram(`📰 <b>Notícias</b>\n\nNenhuma notícia encontrada nas últimas 12h.`)
       return
     }
 
-    const sorted = Object.values(byAsset).sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-    const bullishAssets = sorted.filter(a => a.sentiment === 'bullish')
-    const bearishAssets = sorted.filter(a => a.sentiment === 'bearish')
+    // Conta tweets vs notícias
+    const tweetItems = items.filter((i: any) => i.isTwitter)
+    const newsItems  = items.filter((i: any) => !i.isTwitter)
 
-    let msg = `📰 <b>Notícias — Últimas 12h</b>\n`
-    msg += `<i>${total} notícias de ${[...new Set(items.map(i => i.source))].join(', ')}</i>\n\n`
+    const sorted       = Object.values(byAsset).sort((a: any, b: any) => Math.abs(b.score) - Math.abs(a.score))
+    const bullishAssets = sorted.filter((a: any) => a.sentiment === 'bullish')
+    const bearishAssets = sorted.filter((a: any) => a.sentiment === 'bearish')
+
+    let msg = `📰 <b>Notícias + Influencers — Últimas 12h</b>\n`
+    msg += `<i>${newsItems.length} artigos · ${tweetItems.length} tweets</i>\n`
+    msg += `<i>Fontes: ${sources.slice(0, 5).join(', ')}</i>\n\n`
 
     if (bullishAssets.length) {
-      msg += `🟢 <b>Sentimento Bullish:</b>\n`
-      msg += bullishAssets.slice(0, 5).map(a =>
-        `   <b>${a.asset}</b> (score +${a.score}, ${a.count} notícias)\n` +
-        `   <i>"${a.headlines[0]?.slice(0, 80) ?? ''}"</i>`
-      ).join('\n') + '\n\n'
+      msg += `🟢 <b>Bullish:</b>\n`
+      msg += (bullishAssets as any[]).slice(0, 5).map((a: any) => {
+        const tweetBadge = a.tweetCount > 0 ? ` 🐦${a.tweetCount}` : ''
+        const srcBadge   = a.sources?.includes('@marioNawfal') || a.sources?.includes('@CoinBureau') || a.sources?.includes('@WatcherGuru')
+          ? ` ✦influencer`
+          : ''
+        return (
+          `   <b>${a.asset}</b> +${a.score}${tweetBadge}${srcBadge}\n` +
+          `   <i>${(a.headlines[0] ?? '').slice(0, 90)}</i>`
+        )
+      }).join('\n') + '\n\n'
     }
 
     if (bearishAssets.length) {
-      msg += `🔴 <b>Sentimento Bearish:</b>\n`
-      msg += bearishAssets.slice(0, 5).map(a =>
-        `   <b>${a.asset}</b> (score ${a.score}, ${a.count} notícias)\n` +
-        `   <i>"${a.headlines[0]?.slice(0, 80) ?? ''}"</i>`
-      ).join('\n') + '\n\n'
+      msg += `🔴 <b>Bearish:</b>\n`
+      msg += (bearishAssets as any[]).slice(0, 5).map((a: any) => {
+        const tweetBadge = a.tweetCount > 0 ? ` 🐦${a.tweetCount}` : ''
+        return (
+          `   <b>${a.asset}</b> ${a.score}${tweetBadge}\n` +
+          `   <i>${(a.headlines[0] ?? '').slice(0, 90)}</i>`
+        )
+      }).join('\n') + '\n\n'
     }
 
-    // Últimas 3 manchetes gerais
-    msg += `🔖 <b>Manchetes recentes:</b>\n`
-    msg += items.slice(0, 3).map(h =>
-      `   <i>"${h.title.slice(0, 100)}"</i> — ${h.source}`
-    ).join('\n')
+    // Últimos tweets dos influencers monitorados
+    const influencerTweets = tweetItems.slice(0, 4)
+    if (influencerTweets.length) {
+      msg += `🐦 <b>Influencers recentes:</b>\n`
+      msg += (influencerTweets as any[]).map((h: any) =>
+        `   <b>${h.source}</b>: <i>"${h.title.slice(0, 90)}"</i>`
+      ).join('\n')
+    }
 
     if (msg.length > 3800) {
       const mid = msg.lastIndexOf('\n\n', 3800)
