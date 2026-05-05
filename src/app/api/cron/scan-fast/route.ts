@@ -14,10 +14,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchCandles, fetchFearAndGreed } from '@/lib/fetcher'
+import { fetchCandles, fetchFearAndGreed, fetchFundingRate } from '@/lib/fetcher'
 import { fetchWhaleSentiment } from '@/lib/whales'
 import { fetchNewsSentiment } from '@/lib/news'
-import { computeSnapshot } from '@/lib/indicators'
+import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
 import { computeThreshold } from '@/lib/threshold'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
@@ -65,25 +65,33 @@ export async function GET(req: NextRequest) {
   const macro   = macroRow?.[0] ?? null
   const perfMap = Object.fromEntries((perfRows ?? []).map((p: any) => [p.asset, p]))
 
-  // ── 2. Candles + Notícias + Baleias em paralelo ───────────────────────────
-  // Baleias rodam em background (podem demorar) — Promise.allSettled para não bloquear
-  const [candleResults, newsResult, whaleResult] = await Promise.all([
+  // ── 2. Candles + Funding + Notícias + Baleias em paralelo ───────────────
+  const [candleResults, fundingResults, newsResult, whaleResult] = await Promise.all([
     Promise.allSettled(
       FAST_ASSETS.map(async asset => {
         const [r4h, r1h] = await Promise.allSettled([
-          fetchCandles(asset, '4h').then(c => c.length >= 60 ? computeSnapshot(c) : null).catch(() => null),
+          fetchCandles(asset, '4h').then(c => {
+            if (c.length < 60) return { snap: null, factors: null }
+            const snap = computeSnapshot(c)
+            return { snap, factors: computeSignalFactors(c, snap) }
+          }).catch(() => ({ snap: null, factors: null as SignalFactors | null })),
           fetchCandles(asset, '1h').then(c => c.length >= 60 ? computeSnapshot(c) : null).catch(() => null),
         ])
+        const r4hVal = r4h.status === 'fulfilled' ? r4h.value : { snap: null, factors: null }
         return {
           asset,
-          snap4h: r4h.status === 'fulfilled' ? r4h.value : null,
-          snap1h: r1h.status === 'fulfilled' ? r1h.value : null,
+          snap4h:    r4hVal.snap,
+          factors4h: r4hVal.factors,
+          snap1h:    r1h.status === 'fulfilled' ? r1h.value : null,
         }
       })
     ),
-    fetchNewsSentiment().catch(() => ({ items: [], byAsset: {} as Record<string, any>, total: 0, fetchedAt: '' })),
+    Promise.all(FAST_ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]).catch(() => [a, null] as [string, null]))),
+    fetchNewsSentiment().catch(() => ({ items: [], byAsset: {} as Record<string, any>, total: 0, fetchedAt: '', sources: [] as string[] })),
     fetchWhaleSentiment().catch(() => null),
   ])
+
+  const fundingMap = Object.fromEntries(fundingResults)
 
   const news     = newsResult.byAsset
   const whaleMap: Record<string, any> = {}
@@ -127,40 +135,69 @@ export async function GET(req: NextRequest) {
 
   for (const r of candleResults) {
     if (r.status === 'rejected') continue
-    const { asset, snap4h, snap1h } = r.value
+    const { asset, snap4h, factors4h, snap1h } = r.value
     if (!snap4h) continue
 
-    const d  = snapDB[asset]?.['1d']  ?? null
-    const wk = snapDB[asset]?.['1wk'] ?? null
+    const d       = snapDB[asset]?.['1d']  ?? null
+    const wk      = snapDB[asset]?.['1wk'] ?? null
+    const funding = fundingMap[asset] ?? null
 
-    // ── Score técnico ────────────────────────────────────────────────────────
+    // ── Score v2 — força + volume + EMA + funding ────────────────────────────
     let bullScore = 0
     let bearScore = 0
 
-    if (snap4h.wt_cross_up   && snap4h.wt_zone === 'oversold')   bullScore += W.wt_cross_oversold
-    if (snap4h.bos_up)                                             bullScore += W.bos_up
-    if (snap4h.price_vs_cloud === 'above')                         bullScore += W.price_vs_cloud
-    if (snap4h.tenkan_vs_kijun === 'above')                        bullScore += W.tenkan_vs_kijun
-    if (d?.bias === 'ALTISTA')                                     bullScore += W.daily_bias
-    if (wk?.bias === 'ALTISTA')                                    bullScore += W.weekly_bias
+    // WT por profundidade
+    if (snap4h.wt_cross_up && snap4h.wt_zone === 'oversold') {
+      const depth = factors4h?.wt1_depth ?? Math.abs(snap4h.wt1 ?? 53)
+      bullScore += depth > 75 ? 4 : depth > 60 ? W.wt_cross_oversold : W.wt_cross_oversold * 0.7
+    }
+    if (snap4h.wt_cross_down && snap4h.wt_zone === 'overbought') {
+      const depth = factors4h?.wt1_depth ?? Math.abs(snap4h.wt1 ?? 53)
+      bearScore += depth > 75 ? 4 : depth > 60 ? W.wt_cross_overbought : W.wt_cross_overbought * 0.7
+    }
 
-    if (snap4h.wt_cross_down && snap4h.wt_zone === 'overbought')  bearScore += W.wt_cross_overbought
-    if (snap4h.bos_down)                                           bearScore += W.bos_down
-    if (snap4h.price_vs_cloud === 'below')                         bearScore += W.price_vs_cloud
-    if (snap4h.tenkan_vs_kijun === 'below')                        bearScore += W.tenkan_vs_kijun
-    if (d?.bias === 'BAIXISTA')                                    bearScore += W.daily_bias
-    if (wk?.bias === 'BAIXISTA')                                   bearScore += W.weekly_bias
+    // BOS com volume
+    if (snap4h.bos_up) {
+      const mult = factors4h?.bos_volume_ok ? 1.25 : (factors4h ? 0.5 : 1.0)
+      bullScore += W.bos_up * mult
+    }
+    if (snap4h.bos_down) {
+      const mult = factors4h?.bos_volume_ok ? 1.25 : (factors4h ? 0.5 : 1.0)
+      bearScore += W.bos_down * mult
+    }
 
-    // Ajuste macro
+    if (snap4h.price_vs_cloud === 'above')   bullScore += W.price_vs_cloud
+    if (snap4h.price_vs_cloud === 'below')   bearScore += W.price_vs_cloud
+    if (snap4h.tenkan_vs_kijun === 'above')  bullScore += W.tenkan_vs_kijun
+    if (snap4h.tenkan_vs_kijun === 'below')  bearScore += W.tenkan_vs_kijun
+
+    // EMA 200 (novo)
+    if (snap4h.price_vs_ema === 'above')     bullScore += 0.5
+    if (snap4h.price_vs_ema === 'below')     bearScore += 0.5
+    if (d?.price_vs_ema === 'above')         bullScore += 0.5
+    if (d?.price_vs_ema === 'below')         bearScore += 0.5
+
+    if (d?.bias === 'ALTISTA')               bullScore += W.daily_bias
+    if (d?.bias === 'BAIXISTA')              bearScore += W.daily_bias
+    if (wk?.bias === 'ALTISTA')              bullScore += W.weekly_bias
+    if (wk?.bias === 'BAIXISTA')             bearScore += W.weekly_bias
+
     if (macro?.macro_score != null) {
       bullScore += macro.macro_score * 0.5
       bearScore -= macro.macro_score * 0.5
     }
 
-    // Fear & Greed extremo
     if (fg?.value != null) {
       if (fg.value >= 80) bullScore -= 1
       if (fg.value <= 20) bearScore -= 1
+    }
+
+    // Funding rate (novo)
+    if (funding !== null) {
+      if (funding > 0.0007)       { bullScore -= 2;    bearScore += 0.3 }
+      else if (funding > 0.0004)  { bullScore -= 1 }
+      if (funding < -0.0005)      { bearScore -= 1.5;  bullScore += 0.3 }
+      else if (funding < -0.0002) { bearScore -= 0.5 }
     }
 
     // Baleias
@@ -178,9 +215,14 @@ export async function GET(req: NextRequest) {
     const newsDir    = newsAsset?.sentiment === 'bullish' ? 'long' : newsAsset?.sentiment === 'bearish' ? 'short' : null
 
     log[asset] = {
-      bull: +bullScore.toFixed(1), bear: +bearScore.toFixed(1),
-      threshold, gap: +gap.toFixed(1),
-      news: newsAsset?.sentiment ?? '—', whale: whale?.sentiment ?? '—',
+      bull:     +bullScore.toFixed(1),
+      bear:     +bearScore.toFixed(1),
+      threshold,
+      gap:      +gap.toFixed(1),
+      vol_ratio: factors4h ? +factors4h.volume_ratio.toFixed(2) : null,
+      funding:  funding !== null ? +(funding * 100).toFixed(4) : null,
+      news:     newsAsset?.sentiment ?? '—',
+      whale:    whale?.sentiment ?? '—',
     }
 
     // Helpers de display

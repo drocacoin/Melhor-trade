@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
-import { computeSnapshot } from '@/lib/indicators'
+import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary, fmtStopAlert } from '@/lib/telegram'
 import { computeThreshold } from '@/lib/threshold'
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
   const biases:  Record<string, string> = {}
   let newSignals = 0
 
-  type TfResult   = { tf: string; snap: any | null; err: string | null; count: number }
+  type TfResult   = { tf: string; snap: any | null; factors: SignalFactors | null; err: string | null; count: number }
   type AssetResult = { asset: Asset; tfs: TfResult[] }
 
   async function scanAsset(asset: Asset): Promise<AssetResult> {
@@ -67,12 +67,13 @@ export async function GET(req: NextRequest) {
       TIMEFRAMES.map(async tf => {
         try {
           const candles = await fetchCandles(asset, tf)
-          if (candles.length < 60) return { tf, snap: null, err: `only ${candles.length} candles`, count: candles.length }
-          const snap = computeSnapshot(candles)
-          return { tf, snap, err: null, count: candles.length }
+          if (candles.length < 60) return { tf, snap: null, factors: null, err: `only ${candles.length} candles`, count: candles.length }
+          const snap    = computeSnapshot(candles)
+          const factors = computeSignalFactors(candles, snap)
+          return { tf, snap, factors, err: null, count: candles.length }
         } catch (e: any) {
           console.error(`[scan] ${asset} ${tf}:`, e.message)
-          return { tf, snap: null, err: e.message, count: 0 }
+          return { tf, snap: null, factors: null, err: e.message, count: 0 }
         }
       })
     )
@@ -93,10 +94,17 @@ export async function GET(req: NextRequest) {
     results[asset] = { threshold: thresholds[asset] }
     const snapshots: Record<string, any> = {}
 
-    for (const { tf, snap, err, count } of tfs) {
+    const factors4h: SignalFactors | null = tfs.find(t => t.tf === '4h')?.factors ?? null
+
+    for (const { tf, snap, factors, err, count } of tfs) {
       if (snap) {
-        snapshots[tf] = snap
-        results[asset][tf] = { close: snap.close, bias: snap.bias }
+        snapshots[tf] = { ...snap, _factors: factors }  // fatores só em memória
+        results[asset][tf] = {
+          close: snap.close, bias: snap.bias,
+          vol_ratio: factors ? +factors.volume_ratio.toFixed(2) : null,
+          atr14:     factors ? +factors.atr14.toFixed(2)        : null,
+        }
+        // Persiste apenas campos do schema original (sem _factors)
         await db.from('snapshots').insert({ asset, timeframe: tf, ...snap })
       } else {
         results[asset][tf] = err ?? `only ${count} candles`
@@ -108,7 +116,11 @@ export async function GET(req: NextRequest) {
     // ── Detectar sinal com pesos dinâmicos ────────────────────────────────
     const { threshold } = thresholds[asset]
     const weights = await loadWeights(asset)
-    const signal  = detectSignal(asset, snapshots, fg, threshold, weights, latestMacro, whaleMap)
+    const signal  = detectSignal(
+      asset, snapshots, fg, threshold, weights, latestMacro, whaleMap,
+      fundingMap[asset] ?? null,
+      factors4h,
+    )
 
     if (signal) {
       const whale = whaleMap[asset]
@@ -162,7 +174,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, scanned_at: new Date().toISOString(), fear_greed: fg, thresholds, results })
 }
 
-// ─── Detecção de sinal com pesos dinâmicos ────────────────────────────────────
+// ─── Detecção de sinal v2 — scoring por força + funding + ATR ────────────────
 function detectSignal(
   asset:    Asset,
   snaps:    Record<string, any>,
@@ -171,6 +183,8 @@ function detectSignal(
   weights:  Awaited<ReturnType<typeof loadWeights>>,
   macro:    any,
   whaleMap: Record<string, AssetSentiment> = {},
+  funding:  number | null = null,
+  f4h:      SignalFactors | null = null,    // fatores do 4h ao vivo
 ) {
   const d  = snaps['1d']
   const h4 = snaps['4h']
@@ -180,52 +194,82 @@ function detectSignal(
   let bullScore = 0
   let bearScore = 0
 
-  if (h4.wt_cross_up   && h4.wt_zone === 'oversold')    bullScore += weights.wt_cross_oversold
-  if (h4.bos_up)                                          bullScore += weights.bos_up
-  if (h4.price_vs_cloud === 'above')                      bullScore += weights.price_vs_cloud
-  if (h4.tenkan_vs_kijun === 'above')                     bullScore += weights.tenkan_vs_kijun
-  if (d.bias === 'ALTISTA')                               bullScore += weights.daily_bias
-  if (wk?.bias === 'ALTISTA')                             bullScore += weights.weekly_bias
+  // ── WaveTrend por profundidade ─────────────────────────────────────────────
+  // Oversold profundo (-75 a -100) → sinal de reversão muito mais confiável
+  if (h4.wt_cross_up && h4.wt_zone === 'oversold') {
+    const depth = f4h?.wt1_depth ?? Math.abs(h4.wt1 ?? 53)
+    const pts   = depth > 75 ? 4 : depth > 60 ? weights.wt_cross_oversold : weights.wt_cross_oversold * 0.7
+    bullScore += pts
+  }
+  if (h4.wt_cross_down && h4.wt_zone === 'overbought') {
+    const depth = f4h?.wt1_depth ?? Math.abs(h4.wt1 ?? 53)
+    const pts   = depth > 75 ? 4 : depth > 60 ? weights.wt_cross_overbought : weights.wt_cross_overbought * 0.7
+    bearScore += pts
+  }
 
-  if (h4.wt_cross_down && h4.wt_zone === 'overbought')   bearScore += weights.wt_cross_overbought
-  if (h4.bos_down)                                        bearScore += weights.bos_down
-  if (h4.price_vs_cloud === 'below')                      bearScore += weights.price_vs_cloud
-  if (h4.tenkan_vs_kijun === 'below')                     bearScore += weights.tenkan_vs_kijun
-  if (d.bias === 'BAIXISTA')                              bearScore += weights.daily_bias
-  if (wk?.bias === 'BAIXISTA')                            bearScore += weights.weekly_bias
+  // ── Break of Structure com confirmação de volume ──────────────────────────
+  // BOS sem volume = falso rompimento na maioria dos casos (50-70%)
+  if (h4.bos_up) {
+    const mult = f4h?.bos_volume_ok ? 1.25 : (f4h ? 0.5 : 1.0)  // sem dados → peso normal
+    bullScore += weights.bos_up * mult
+  }
+  if (h4.bos_down) {
+    const mult = f4h?.bos_volume_ok ? 1.25 : (f4h ? 0.5 : 1.0)
+    bearScore += weights.bos_down * mult
+  }
 
-  // ── Ajuste macro: risk-on favorece longs, risk-off favorece shorts ────────
-  // macro_score vai de -2 a +2:
-  //   +2 → bullScore +1, bearScore -1  (ambiente muito favorável para longs)
-  //   -2 → bullScore -1, bearScore +1  (ambiente muito favorável para shorts)
+  // ── Ichimoku cloud ────────────────────────────────────────────────────────
+  if (h4.price_vs_cloud === 'above')   bullScore += weights.price_vs_cloud
+  if (h4.price_vs_cloud === 'below')   bearScore += weights.price_vs_cloud
+
+  // ── Tenkan vs Kijun ───────────────────────────────────────────────────────
+  if (h4.tenkan_vs_kijun === 'above')  bullScore += weights.tenkan_vs_kijun
+  if (h4.tenkan_vs_kijun === 'below')  bearScore += weights.tenkan_vs_kijun
+
+  // ── EMA 200 — fator de tendência de longo prazo (novo) ───────────────────
+  if (h4.price_vs_ema === 'above')     bullScore += 0.5
+  if (h4.price_vs_ema === 'below')     bearScore += 0.5
+  if (d.price_vs_ema === 'above')      bullScore += 0.5
+  if (d.price_vs_ema === 'below')      bearScore += 0.5
+
+  // ── Bias diário e semanal ─────────────────────────────────────────────────
+  if (d.bias === 'ALTISTA')            bullScore += weights.daily_bias
+  if (d.bias === 'BAIXISTA')           bearScore += weights.daily_bias
+  if (wk?.bias === 'ALTISTA')          bullScore += weights.weekly_bias
+  if (wk?.bias === 'BAIXISTA')         bearScore += weights.weekly_bias
+
+  // ── Ajuste macro ──────────────────────────────────────────────────────────
   if (macro?.macro_score != null) {
     const ms = macro.macro_score as number
     bullScore += ms * 0.5
     bearScore -= ms * 0.5
   }
 
-  // ── Fear & Greed extremo penaliza a direção da euforia/pânico ─────────────
+  // ── Fear & Greed extremo ──────────────────────────────────────────────────
   if (fg) {
     if (fg.value >= 80) bullScore -= 1
     if (fg.value <= 20) bearScore -= 1
   }
 
-  // ── Sentimento das baleias (top traders HyperLiquid por consistência) ──────
-  // Exige mínimo de 2 traders posicionados para ter relevância estatística.
-  // Bullish: baleias majoritariamente long → reforça bull (+1.5, +0.5 se >75%)
-  // Bearish: baleias majoritariamente short → reforça bear (+1.5, +0.5 se <25%)
-  // Divergência implícita: se baleias vão na direção contrária ao sinal técnico,
-  //   o boost vai para o lado delas, reduzindo a vantagem do sinal técnico.
+  // ── Funding rate — penalidade de trades lotados (novo) ───────────────────
+  // Valores típicos: 0.0001 = 0.01%/8h (neutro), 0.001 = 0.1%/8h (muito lotado)
+  if (funding !== null) {
+    if (funding > 0.0007)       { bullScore -= 2;    bearScore += 0.3 }   // longs muito lotados
+    else if (funding > 0.0004)  { bullScore -= 1 }                         // longs lotados
+    if (funding < -0.0005)      { bearScore -= 1.5;  bullScore += 0.3 }   // shorts lotados → squeeze
+    else if (funding < -0.0002) { bearScore -= 0.5 }
+  }
+
+  // ── Baleias HyperLiquid ───────────────────────────────────────────────────
   const whale = whaleMap[asset]
   if (whale && whale.longCount + whale.shortCount >= 2) {
     if (whale.sentiment === 'bullish') {
       bullScore += 1.5
-      if (whale.sentimentPct > 75) bullScore += 0.5  // maioria esmagadora
+      if (whale.sentimentPct > 75) bullScore += 0.5
     } else if (whale.sentiment === 'bearish') {
       bearScore += 1.5
-      if (whale.sentimentPct < 25) bearScore += 0.5  // maioria esmagadora de shorts
+      if (whale.sentimentPct < 25) bearScore += 0.5
     }
-    // neutral: baleias divididas → sem ajuste
   }
 
   const isLong  = bullScore >= minScore
@@ -234,19 +278,26 @@ function detectSignal(
 
   const direction  = isLong ? 'long' : 'short'
   const close      = h4.close
-  const swing_low  = h4.last_swing_low  ?? close * 0.97
-  const swing_high = h4.last_swing_high ?? close * 1.03
 
-  const stop    = isLong ? swing_low * 0.995 : swing_high * 1.005
-  const target1 = isLong ? close * 1.05      : close * 0.95
-  const rr1     = Math.abs(close - target1) / Math.abs(close - stop)
-
-  if (rr1 < 2) return null
+  // ── Stops e targets via ATR-14 (dinâmico por ativo) ──────────────────────
+  // Substitui os % fixos (5%/10%/15%) que ignoravam volatilidade real
+  const atr = f4h?.atr14 ?? close * 0.02   // fallback: 2% do preço
+  const stop    = isLong ? close - 1.5 * atr : close + 1.5 * atr
+  const target1 = isLong ? close + 3.0 * atr : close - 3.0 * atr   // RR 2:1
+  const target2 = isLong ? close + 5.0 * atr : close - 5.0 * atr   // RR 3.33:1
+  const target3 = isLong ? close + 8.0 * atr : close - 8.0 * atr   // RR 5.33:1
+  const rr1     = 3.0 / 1.5  // = 2.0 sempre com ATR-based
 
   const totalScore = isLong ? bullScore : bearScore
-  const grade      = totalScore >= minScore + 2 ? 'A+' : totalScore >= minScore + 1 ? 'A' : 'B'
-  const entryLow   = isLong ? close * 0.998 : close * 0.995
-  const entryHigh  = isLong ? close * 1.002 : close * 1.005
+  const grade      = totalScore >= minScore + 3 ? 'A+' : totalScore >= minScore + 1.5 ? 'A' : 'B'
+
+  // Zona de entrada ±0.3% do preço atual (um pouco mais folgada que antes)
+  const entryLow  = isLong ? close * 0.997 : close * 0.994
+  const entryHigh = isLong ? close * 1.003 : close * 1.006
+
+  // Stop de cancelamento baseado em swing + distância do cloud
+  const swing_low  = h4.last_swing_low  ?? close - 2 * atr
+  const swing_high = h4.last_swing_high ?? close + 2 * atr
 
   return {
     asset, direction, setup_grade: grade,
@@ -255,15 +306,15 @@ function detectSignal(
     entry_zone_high: Math.round(entryHigh * 100) / 100,
     stop:    Math.round(stop    * 100) / 100,
     target1: Math.round(target1 * 100) / 100,
-    target2: Math.round((isLong ? close * 1.10 : close * 0.90) * 100) / 100,
-    target3: Math.round((isLong ? close * 1.15 : close * 0.85) * 100) / 100,
-    rr1:     Math.round(rr1 * 10) / 10,
+    target2: Math.round(target2 * 100) / 100,
+    target3: Math.round(target3 * 100) / 100,
+    rr1,
     trigger: isLong
-      ? `Candle 4h fechando acima de $${entryHigh.toFixed(2)} com WT cruzado para cima`
-      : `Candle 4h fechando abaixo de $${entryLow.toFixed(2)} com WT cruzado para baixo`,
+      ? `4h fecha acima de $${entryHigh.toFixed(2)} — WT cruzado com volume`
+      : `4h fecha abaixo de $${entryLow.toFixed(2)} — WT cruzado com volume`,
     cancellation: isLong
-      ? `Fechamento diário abaixo de $${(swing_low * 0.99).toFixed(2)}`
-      : `Fechamento diário acima de $${(swing_high * 1.01).toFixed(2)}`,
+      ? `Fechamento diário abaixo de $${(swing_low * 0.99).toFixed(2)} (swing low)`
+      : `Fechamento diário acima de $${(swing_high * 1.01).toFixed(2)} (swing high)`,
     analysis: '', status: 'active',
   }
 }

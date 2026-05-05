@@ -7,7 +7,7 @@
  */
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
+import { fetchFearAndGreed, fetchLivePrice, fetchFundingRate } from '@/lib/fetcher'
 import { computeLiveScore } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { fetchWhaleSentiment } from '@/lib/whales'
@@ -35,6 +35,7 @@ export async function POST() {
       { data: monthlyJournal },
       whaleSentiment,
       newsResult,
+      fundingPairs,
     ] = await Promise.all([
       fetchFearAndGreed().catch(() => null),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
@@ -46,10 +47,12 @@ export async function POST() {
       db.from('monthly_journals').select('*').order('month', { ascending: false }).limit(1),
       fetchWhaleSentiment().catch(() => null),
       fetchNewsSentiment().catch(() => null),
+      Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]).catch(() => [a, null] as [string, null]))),
     ])
 
-    const macro   = macroRow?.[0] ?? null
-    const perfMap = Object.fromEntries((perfRows ?? []).map((p: any) => [p.asset, p]))
+    const macro      = macroRow?.[0] ?? null
+    const perfMap    = Object.fromEntries((perfRows ?? []).map((p: any) => [p.asset, p]))
+    const fundingMap = Object.fromEntries(fundingPairs) as Record<string, number | null>
 
     // ── 2. Scores atuais por ativo ──────────────────────────────────────────
     const seen = new Set<string>()
@@ -63,9 +66,10 @@ export async function POST() {
       const byTf: Record<string, any> = Object.fromEntries(
         latestSnaps.filter((s: any) => s.asset === asset).map((s: any) => [s.timeframe, s])
       )
-      const score = computeLiveScore(byTf, fg)
-      const thr   = computeThreshold(perfMap[asset])
-      return { asset, ...score, threshold: thr.threshold, gap: thr.threshold - score.topScore }
+      const funding = (fundingMap as Record<string, number | null>)[asset] ?? null
+      const score   = computeLiveScore(byTf, fg, funding)
+      const thr     = computeThreshold(perfMap[asset])
+      return { asset, ...score, threshold: thr.threshold, gap: thr.threshold - score.topScore, funding }
     }).sort((a, b) => a.gap - b.gap)
 
     // ── 3. Preços ao vivo — fail-safe por ativo ─────────────────────────────
@@ -99,10 +103,13 @@ export async function POST() {
     )
     const scoresForPrompt = [...top8, ...extra]
 
-    const scoresText = scoresForPrompt.map(s =>
-      `${s.asset}: bull=${s.bullScore} bear=${s.bearScore} threshold=${s.threshold} ` +
-      `(${s.gap <= 0 ? '🚨 SINAL' : `falta ${s.gap.toFixed(1)}pts`})`
-    ).join('\n')
+    const scoresText = scoresForPrompt.map(s => {
+      const fundingTag = s.funding != null
+        ? ` | funding ${s.funding > 0 ? '+' : ''}${(s.funding * 100).toFixed(3)}%`
+        : ''
+      const status = s.gap <= 0 ? '🚨 SINAL' : `falta ${s.gap.toFixed(1)}pts`
+      return `${s.asset}: bull=${s.bullScore.toFixed(1)} bear=${s.bearScore.toFixed(1)} thr=${s.threshold} (${status})${fundingTag}`
+    }).join('\n')
 
     const openText = (openTrades ?? []).length
       ? (openTrades ?? []).map((t: any) => {

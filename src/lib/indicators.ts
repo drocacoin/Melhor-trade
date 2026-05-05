@@ -21,6 +21,25 @@ export interface IndicatorSnapshot {
   bull_pts: number; bear_pts: number
 }
 
+/**
+ * Fatores adicionais de qualidade do sinal — calculados ao vivo (não persistidos no DB).
+ * Usados apenas na detecção de sinal; o snapshot base permanece imutável para auditoria.
+ */
+export interface SignalFactors {
+  /** Volume atual / SMA-20 de volume. >1.5 = confirmado, <0.7 = fraco */
+  volume_ratio:    number
+  /** ATR-14: volatilidade média real, base para stops/targets dinâmicos */
+  atr14:           number
+  /** BOS acompanhado de volume > 1.3× a média — muito mais confiável */
+  bos_volume_ok:   boolean
+  /** abs(wt1): profundidade na zona. >75 = extremo, 53-75 = moderado */
+  wt1_depth:       number
+  /** (close - ema200) / close × 100 — positivo = acima da tendência de longo prazo */
+  ema200_gap_pct:  number
+  /** Distância em % para o limite da nuvem (positivo = acima, negativo = abaixo, 0 = inside) */
+  cloud_gap_pct:   number
+}
+
 function ema(values: number[], span: number): number[] {
   const k = 2 / (span + 1)
   const result: number[] = []
@@ -144,4 +163,54 @@ export function computeSnapshot(candles: OHLCV[]): IndicatorSnapshot {
     last_swing_high, last_swing_low, bos_up, bos_down,
     bias, bull_pts, bear_pts,
   }
+}
+
+/**
+ * Calcula fatores de qualidade do sinal a partir dos candles brutos.
+ * Não altera o IndicatorSnapshot (que é persistido no DB) — retorna campos extras
+ * usados apenas na lógica de pontuação em memória.
+ */
+export function computeSignalFactors(candles: OHLCV[], snap: IndicatorSnapshot): SignalFactors {
+  const closes = candles.map(c => c.close)
+  const highs  = candles.map(c => c.high)
+  const lows   = candles.map(c => c.low)
+  const vols   = candles.map(c => c.volume)
+  const n      = closes.length
+  const last   = n - 1
+
+  // ── Volume ratio (SMA-20) ──────────────────────────────────────────────────
+  const volWindow  = vols.slice(Math.max(0, last - 19), last + 1)
+  const volSma20   = volWindow.reduce((a, b) => a + b, 0) / volWindow.length
+  const volume_ratio = volSma20 > 0 ? vols[last] / volSma20 : 1
+
+  // ── ATR-14 (Average True Range) ───────────────────────────────────────────
+  const atrLen = Math.min(14, n - 1)
+  let atrSum = 0
+  for (let i = last - atrLen + 1; i <= last; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i]  - closes[i - 1]),
+    )
+    atrSum += tr
+  }
+  const atr14 = atrLen > 0 ? atrSum / atrLen : snap.close * 0.02
+
+  // ── BOS confirmado com volume ─────────────────────────────────────────────
+  const bos_volume_ok = (snap.bos_up || snap.bos_down) && volume_ratio >= 1.3
+
+  // ── Profundidade do WaveTrend ─────────────────────────────────────────────
+  const wt1_depth = Math.abs(snap.wt1)
+
+  // ── Distância da EMA 200 (%) ──────────────────────────────────────────────
+  const ema200_gap_pct = snap.ema200 > 0
+    ? ((snap.close - snap.ema200) / snap.close) * 100
+    : 0
+
+  // ── Distância da nuvem (%) ────────────────────────────────────────────────
+  let cloud_gap_pct = 0
+  if (snap.price_vs_cloud === 'above')  cloud_gap_pct = ((snap.close - snap.cloud_top)    / snap.close) * 100
+  if (snap.price_vs_cloud === 'below')  cloud_gap_pct = ((snap.close - snap.cloud_bottom) / snap.close) * 100
+
+  return { volume_ratio, atr14, bos_volume_ok, wt1_depth, ema200_gap_pct, cloud_gap_pct }
 }
