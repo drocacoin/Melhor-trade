@@ -19,6 +19,7 @@ import { sendTelegram } from '@/lib/telegram'
 import { fetchLivePrice, fetchFearAndGreed } from '@/lib/fetcher'
 import { fetchWhaleSentiment } from '@/lib/whales'
 import { fetchNewsSentiment } from '@/lib/news'
+import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
 import { Asset } from '@/types'
 
 export const maxDuration = 60
@@ -118,9 +119,11 @@ export async function POST(req: NextRequest) {
 async function handleStatus() {
   const db = supabaseAdmin()
 
-  const [{ data: macro }, fg] = await Promise.all([
+  const [{ data: macro }, fg, { data: openTrades }, { data: recentClosed }] = await Promise.all([
     db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1).single(),
     fetchFearAndGreed(),
+    db.from('trades').select('id,asset,direction,leverage,entry_price,stop_price,target1').eq('status', 'open'),
+    db.from('trades').select('id,pnl_usd,pnl_pct,closed_at').eq('status', 'closed').order('closed_at', { ascending: false }).limit(10),
   ])
 
   const regimeEmoji: Record<string, string> = {
@@ -130,12 +133,36 @@ async function handleStatus() {
   const macroLine = macro
     ? `${regimeEmoji[macro.regime] ?? '⚪'} Regime: <b>${macro.regime.toUpperCase()}</b> | Score: <b>${macro.macro_score >= 0 ? '+' : ''}${macro.macro_score}</b>\n` +
       `DXY: ${macro.dxy_trend} · Yields: ${macro.yields_trend} · FED: ${macro.fed_stance}\n` +
-      (macro.notes ? `<i>${macro.notes.slice(0, 200)}</i>` : '')
-    : 'Sem leitura macro registrada. Use /macro para atualizar.'
+      (macro.notes ? `<i>${macro.notes.slice(0, 150)}</i>` : '')
+    : 'Sem leitura macro registrada.'
 
   const fgEmoji = !fg ? '—' : fg.value >= 75 ? '🤑' : fg.value <= 25 ? '😱' : '😐'
   const fgLine  = fg ? `📊 Fear &amp; Greed: ${fgEmoji} <b>${fg.value}</b> — ${fg.label}` : ''
 
+  // ── Circuit breaker ───────────────────────────────────────────────────────
+  const cb = evaluateCircuitBreaker(recentClosed ?? [])
+  const cbLine = cb.triggered
+    ? `⛔ <b>Circuit Breaker ATIVO</b> — ${cb.reason}`
+    : `✅ Circuit Breaker: inativo (WR5=${cb.last5wr ?? '—'}% | WR10=${cb.last10wr ?? '—'}%)`
+
+  // ── Performance recente ───────────────────────────────────────────────────
+  const closed   = recentClosed ?? []
+  const isWin    = (t: any) => (t.pnl_usd ?? 0) > 0
+  const wins     = closed.filter(isWin).length
+  const pnlTotal = closed.reduce((s: number, t: any) => s + (t.pnl_usd ?? 0), 0)
+  const perfLine = closed.length
+    ? `📈 Últimos ${closed.length} trades: <b>${wins}W/${closed.length - wins}L</b> | P&L $${pnlTotal >= 0 ? '+' : ''}${pnlTotal.toFixed(0)}`
+    : ''
+
+  // ── Posições abertas ──────────────────────────────────────────────────────
+  const posLine = openTrades?.length
+    ? `📋 <b>${openTrades.length} posição(ões) aberta(s):</b>\n` +
+      openTrades.map((t: any) =>
+        `  ${t.direction === 'long' ? '🟢' : '🔴'} ${t.asset} ${t.direction.toUpperCase()} ${t.leverage}x @ $${t.entry_price} | stop $${t.stop_price ?? '?'}`
+      ).join('\n')
+    : '📭 Sem posições abertas.'
+
+  // ── Sinais ativos ─────────────────────────────────────────────────────────
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
   const { data: signals } = await db
     .from('signals')
@@ -145,14 +172,17 @@ async function handleStatus() {
     .order('detected_at', { ascending: false })
 
   const signalLine = signals?.length
-    ? `\n🚨 <b>${signals.length} sinal(is) ativo(s) nas últimas 24h:</b>\n` +
-      signals.map(s => `   ${s.direction === 'long' ? '🟢' : '🔴'} ${s.asset} ${s.direction.toUpperCase()} [${s.setup_grade}]`).join('\n')
-    : '\n✅ Sem sinais ativos nas últimas 24h.'
+    ? `🚨 <b>${signals.length} sinal(is) ativo(s):</b>\n` +
+      signals.map(s => `  ${s.direction === 'long' ? '🟢' : '🔴'} ${s.asset} ${s.direction.toUpperCase()} [${s.setup_grade}]`).join('\n')
+    : '✅ Sem sinais ativos (24h).'
 
   await sendTelegram(
     `📊 <b>Status — Melhor Trade</b>\n\n` +
     `${macroLine}\n\n` +
-    `${fgLine}` +
+    `${fgLine}\n` +
+    `${perfLine}\n\n` +
+    `${cbLine}\n\n` +
+    `${posLine}\n\n` +
     `${signalLine}`
   )
 }

@@ -4,6 +4,7 @@ import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indi
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
+import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
 import { computeThreshold } from '@/lib/threshold'
 import { loadWeights } from '@/lib/weights'
 import { generateSignalAnalysis } from '@/lib/signal-analysis'
@@ -342,42 +343,4 @@ function detectSignal(
 
 // checkStopAlerts movido para @/lib/stop-monitor — compartilhado com scan-fast
 
-// ─── Circuit breaker ──────────────────────────────────────────────────────────
-/**
- * Avalia se o sistema deve pausar emissão de novos sinais.
- * Critérios:
- *  1. Últimas 5 operações: ≥4 perdas (≤20% WR) → breaker
- *  2. Últimas 10 operações: WR < 25% → breaker
- */
-function evaluateCircuitBreaker(
-  trades: { pnl_usd: number | null }[]
-): { triggered: boolean; reason: string } {
-  if (trades.length < 3) return { triggered: false, reason: '' }
-
-  const isWin = (t: any) => (t.pnl_usd ?? 0) > 0
-
-  // Regra 1: últimos 5 — ≥ 4 perdas
-  const last5   = trades.slice(0, 5)
-  const wins5   = last5.filter(isWin).length
-  const losses5 = last5.length - wins5
-  if (last5.length >= 5 && losses5 >= 4) {
-    return {
-      triggered: true,
-      reason:    `${losses5}/${last5.length} perdas nos últimos 5 trades (WR ${Math.round(wins5 / last5.length * 100)}%)`,
-    }
-  }
-
-  // Regra 2: últimos 10 — WR < 25%
-  const last10 = trades.slice(0, 10)
-  if (last10.length >= 10) {
-    const wr10 = last10.filter(isWin).length / last10.length
-    if (wr10 < 0.25) {
-      return {
-        triggered: true,
-        reason:    `WR ${Math.round(wr10 * 100)}% nos últimos 10 trades — abaixo de 25%`,
-      }
-    }
-  }
-
-  return { triggered: false, reason: '' }
-}
+// evaluateCircuitBreaker movido para @/lib/circuit-breaker — compartilhado com webhook /status
