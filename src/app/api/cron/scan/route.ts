@@ -131,7 +131,12 @@ export async function GET(req: NextRequest) {
       ])
 
       const correlation = checkCorrelation(asset, signal.direction, openTrades ?? [])
-      const riskSuggest = suggestRisk(history?.winRate ?? null, signal.rr1)
+      const riskSuggest = suggestRisk(
+        history?.winRate    ?? null,
+        history?.avgWinPct  ?? null,
+        history?.avgLossPct ?? null,
+        signal.rr1
+      )
 
       const enriched = {
         ...signal,

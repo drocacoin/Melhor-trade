@@ -10,6 +10,8 @@ export interface SetupHistory {
   winRate:      number          // WR histórico neste ativo+direção
   totalTrades:  number
   avgPnlPct:    number
+  avgWinPct:    number          // média dos trades vencedores (positivo)
+  avgLossPct:   number          // média dos trades perdedores (valor absoluto)
 }
 
 export async function fetchSetupHistory(
@@ -30,10 +32,17 @@ export async function fetchSetupHistory(
 
   const lastResults = trades.slice(0, 5).map((t: any) => Math.round((t.pnl_pct ?? 0) * 10) / 10)
   const winners     = trades.filter((t: any) => (t.pnl_usd ?? 0) > 0)
+  const losers      = trades.filter((t: any) => (t.pnl_usd ?? 0) <= 0)
   const winRate     = Math.round((winners.length / trades.length) * 100)
   const avgPnlPct   = Math.round(trades.reduce((s: number, t: any) => s + (t.pnl_pct ?? 0), 0) / trades.length * 10) / 10
+  const avgWinPct   = winners.length
+    ? +(winners.reduce((s: number, t: any) => s + (t.pnl_pct ?? 0), 0) / winners.length).toFixed(2)
+    : 0
+  const avgLossPct  = losers.length
+    ? +Math.abs(losers.reduce((s: number, t: any) => s + (t.pnl_pct ?? 0), 0) / losers.length).toFixed(2)
+    : 0
 
-  return { lastResults, winRate, totalTrades: trades.length, avgPnlPct }
+  return { lastResults, winRate, totalTrades: trades.length, avgPnlPct, avgWinPct, avgLossPct }
 }
 
 // ─── Correlação entre posições ────────────────────────────────────────────────
@@ -74,39 +83,74 @@ export function checkCorrelation(
   }
 }
 
-// ─── Tamanho de posição sugerido ──────────────────────────────────────────────
+// ─── Tamanho de posição — Kelly Criterion (½ Kelly) ──────────────────────────
+/**
+ * Fórmula Kelly: f* = p − (1−p)/b
+ *   p = taxa de acerto (0..1)
+ *   b = razão avgWin / avgLoss (R múltiplo real)
+ *
+ * Usamos ½ Kelly para reduzir drawdown (~75% do retorno ótimo com ~50% da volatilidade).
+ * O resultado é mapeado linearmente para [0.5%, 2.5%] de capital a arriscar por trade.
+ *
+ * Escala: halfKelly=0.00 → 0.5% | halfKelly=0.50 → 2.5%
+ *   riskPct = 0.5 + (halfKelly / 0.5) × 2.0  (clamped 0.5–2.5)
+ */
 export function suggestRisk(
-  winRate: number | null,
-  rr: number
-): { riskPct: number; rationale: string } {
-  // Baseado em WR histórico — quanto maior o WR, mais arrojado
-  let riskPct: number
-  let rationale: string
+  winRate:    number | null,
+  avgWinPct:  number | null,   // P&L médio dos trades vencedores (> 0)
+  avgLossPct: number | null,   // P&L médio dos trades perdedores (valor absoluto, > 0)
+  rr:         number
+): { riskPct: number; rationale: string; kelly: number | null } {
 
-  if (winRate === null) {
-    riskPct  = 1.0
-    rationale = 'sem histórico suficiente'
-  } else if (winRate >= 65) {
-    riskPct  = 2.0
-    rationale = `WR ${winRate}% — histórico forte`
-  } else if (winRate >= 55) {
-    riskPct  = 1.5
-    rationale = `WR ${winRate}% — histórico positivo`
-  } else if (winRate >= 45) {
-    riskPct  = 1.0
-    rationale = `WR ${winRate}% — histórico misto`
-  } else {
-    riskPct  = 0.5
-    rationale = `WR ${winRate}% — histórico fraco, cautela`
+  // ── Kelly disponível ────────────────────────────────────────────────────────
+  if (
+    winRate    !== null &&
+    avgWinPct  !== null && avgWinPct  > 0 &&
+    avgLossPct !== null && avgLossPct > 0
+  ) {
+    const p   = winRate / 100
+    const b   = avgWinPct / avgLossPct          // reward-to-risk real
+    const fk  = p - (1 - p) / b                 // Kelly completo
+    const hk  = fk / 2                          // ½ Kelly
+
+    // Mapeamento linear para % de capital: hk=0→0.5%, hk=0.5→2.5%
+    const raw     = 0.5 + (hk / 0.5) * 2.0
+    const riskPct = +Math.min(Math.max(raw, 0.5), 2.5).toFixed(1)
+
+    const bStr  = b.toFixed(2)
+    const hkPct = (hk * 100).toFixed(1)
+
+    if (fk <= 0) {
+      return {
+        riskPct:  0.5,
+        rationale: `½ Kelly negativo (WR${winRate}% b=${bStr}) — sistema desfavorável, mínimo`,
+        kelly:     +hk.toFixed(4),
+      }
+    }
+
+    return {
+      riskPct,
+      rationale: `½ Kelly ${hkPct}% · WR${winRate}% · b=${bStr} (win÷loss) → ${riskPct}% capital`,
+      kelly:     +hk.toFixed(4),
+    }
   }
 
-  // RR bônus — se RR for excelente, risco um pouco maior vale
+  // ── Fallback: sem histórico suficiente ────────────────────────────────────
+  let riskPct  = 1.0
+  let rationale = 'sem histórico (Kelly indisponível)'
+
+  if (winRate !== null) {
+    if (winRate >= 65)      { riskPct = 1.5; rationale = `WR ${winRate}% · fallback heurístico` }
+    else if (winRate >= 50) { riskPct = 1.0; rationale = `WR ${winRate}% · fallback heurístico` }
+    else                    { riskPct = 0.5; rationale = `WR ${winRate}% fraco · fallback heurístico` }
+  }
+
   if (rr >= 3.5 && riskPct < 2.0) {
-    riskPct  = Math.min(riskPct + 0.5, 2.0)
+    riskPct   = Math.min(riskPct + 0.5, 2.0)
     rationale += ` + RR ${rr}:1 excelente`
   }
 
-  return { riskPct, rationale }
+  return { riskPct, rationale, kelly: null }
 }
 
 // ─── Estratégia de saída ──────────────────────────────────────────────────────
