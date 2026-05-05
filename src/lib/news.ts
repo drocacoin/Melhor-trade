@@ -77,20 +77,44 @@ const ASSET_KEYWORDS: Record<string, string[]> = {
   GOLD:  ['gold price', 'gold rally', 'gold drops', 'xau'],
 }
 
-// ─── Palavras de sentimento ───────────────────────────────────────────────────
+// ─── Palavras de sentimento — v2 (lista expandida) ───────────────────────────
 const BULLISH_WORDS = [
-  'surge', 'surges', 'rally', 'soar', 'soars', 'jump', 'jumps', 'climb',
-  'breakout', 'breaks out', 'record high', 'all-time high', 'ath', 'new high',
-  'bullish', 'bull', 'gains', 'rises', 'pumps', 'approved', 'approves',
-  'etf', 'adoption', 'partnership', 'launch', 'upgrade', 'accumulate',
-  'recovery', 'rebound', 'explodes', 'moons', 'massive gains',
+  // Preço
+  'surge', 'surges', 'surging', 'rally', 'rallies', 'rallying',
+  'soar', 'soars', 'soaring', 'jump', 'jumps', 'jumping', 'spike',
+  'climb', 'climbs', 'breakout', 'breaks out', 'broke out',
+  'record high', 'all-time high', 'ath', 'new high', 'new record',
+  'explodes', 'moons', 'parabolic', 'skyrockets',
+  // Momentum / sentimento
+  'bullish', 'bull run', 'bull market', 'gains', 'rises', 'pumps',
+  'outperforms', 'recovery', 'rebound', 'bounces', 'bounce back',
+  'accumulate', 'accumulation', 'whale buying', 'institutional buying',
+  // Catalisadores
+  'approved', 'approves', 'approval', 'etf', 'spot etf',
+  'adoption', 'mainstream', 'partnership', 'integration',
+  'launch', 'launches', 'launched', 'upgrade', 'upgraded',
+  'halving', 'supply squeeze', 'inflows', 'net inflow',
+  'regulation clarity', 'regulatory clarity', 'sec approves',
+  'listing', 'listed', 'strategic reserve', 'treasury buys',
 ]
 const BEARISH_WORDS = [
-  'crash', 'crashes', 'plunge', 'plunges', 'dump', 'dumps', 'drop', 'drops',
-  'fall', 'falls', 'collapse', 'collapses', 'selloff', 'sell-off',
-  'bearish', 'bear', 'banned', 'ban', 'hack', 'hacked', 'exploit',
-  'fraud', 'scam', 'liquidation', 'liquidated', 'losses', 'declining',
-  'warning', 'concern', 'risk', 'crackdown', 'investigation', 'seized',
+  // Preço
+  'crash', 'crashes', 'crashing', 'plunge', 'plunges', 'plunging',
+  'dump', 'dumps', 'dumping', 'drop', 'drops', 'dropping',
+  'fall', 'falls', 'falling', 'collapse', 'collapses',
+  'selloff', 'sell-off', 'selling pressure', 'capitulation',
+  'correction', 'wipeout', 'tanks', 'tanking', 'plummets', 'nosedive',
+  // Momentum / sentimento
+  'bearish', 'bear market', 'losses', 'declining', 'outflows', 'net outflow',
+  'exodus', 'weak', 'weakness', 'underperforms',
+  // Riscos / regulação
+  'banned', 'ban', 'bans', 'outlawed', 'hack', 'hacked', 'exploit', 'exploited',
+  'rug pull', 'fraud', 'fraudulent', 'scam', 'ponzi', 'securities fraud',
+  'liquidation', 'liquidated', 'margin call', 'forced selling',
+  'crackdown', 'cracks down', 'investigation', 'indictment',
+  'seized', 'seizes', 'arrest', 'arrested', 'charged',
+  'delisted', 'delist', 'exchange halts', 'warning', 'vulnerability',
+  'insolvency', 'insolvent', 'bankrupt', 'bankruptcy', 'contagion',
 ]
 
 // ─── Types ────────────────────────────────────────────────────────────────────
