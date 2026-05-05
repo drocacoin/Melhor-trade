@@ -30,6 +30,19 @@ const FACTORS = [
 const MIN_WEIGHT = 0.5   // nenhum fator some completamente
 const MAX_WEIGHT = 2.0   // nenhum fator domina demais
 
+// Pontos base de cada fator — loadWeights faz weight × base_points
+// Estes são os mesmos do DEFAULT_WEIGHTS em src/lib/weights.ts
+const FACTOR_BASE_POINTS: Record<string, number> = {
+  wt_cross_oversold:   3,
+  bos_up:              2,
+  price_vs_cloud:      1,
+  tenkan_vs_kijun:     1,
+  daily_bias:          2,
+  weekly_bias:         1,
+  wt_cross_overbought: 3,
+  bos_down:            2,
+}
+
 export async function GET(req: NextRequest) {
   const bearer = req.headers.get('authorization')?.replace('Bearer ', '')
   const secret = bearer ?? req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret')
@@ -132,6 +145,7 @@ export async function GET(req: NextRequest) {
       .upsert({
         asset:           null,
         factor:          factor.key,
+        base_points:     FACTOR_BASE_POINTS[factor.key] ?? 1,
         weight:          newWeight,
         win_count:       stats.wins,
         loss_count:      stats.losses,
@@ -170,6 +184,7 @@ export async function GET(req: NextRequest) {
       await db.from('scoring_weights').upsert({
         asset,
         factor:          factor.key,
+        base_points:     FACTOR_BASE_POINTS[factor.key] ?? 1,
         weight:          newWeight,
         win_count:       stats.wins,
         loss_count:      stats.losses,

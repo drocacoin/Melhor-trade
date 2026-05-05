@@ -47,10 +47,13 @@ export async function loadWeights(asset: string): Promise<ScoringWeights> {
     const specific = data.filter((r: any) => r.asset === asset)
 
     for (const row of globals) {
-      merged[row.factor] = Number(row.weight) * Number(row.base_points)
+      // Fallback: se base_points for null (linha sem seed), usa DEFAULT
+      const bp = row.base_points != null ? Number(row.base_points) : (DEFAULT_WEIGHTS as any)[row.factor] ?? 1
+      merged[row.factor] = Number(row.weight) * bp
     }
     for (const row of specific) {
-      merged[row.factor] = Number(row.weight) * Number(row.base_points)
+      const bp = row.base_points != null ? Number(row.base_points) : (DEFAULT_WEIGHTS as any)[row.factor] ?? 1
+      merged[row.factor] = Number(row.weight) * bp
     }
 
     return {
