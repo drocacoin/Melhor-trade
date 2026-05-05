@@ -21,6 +21,7 @@ import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indi
 import { computeThreshold } from '@/lib/threshold'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
+import { checkStopAlerts } from '@/lib/stop-monitor'
 import { Asset } from '@/types'
 
 export const maxDuration = 120
@@ -323,15 +324,20 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // ── 7. Monitor de stops/alvos (30min = mais responsivo que o scan 1h) ───────
+  const stopResult = await checkStopAlerts(db, openTrades ?? [])
+
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
   return NextResponse.json({
-    ok:         true,
-    elapsed_s:  elapsed,
-    news_items: newsResult.total,
-    whales:     whaleResult?.traders?.length ?? 0,
-    signals:    signals.length,
-    forming:    forming.length,
-    newsFlash:  newsOnly.length,
+    ok:            true,
+    elapsed_s:     elapsed,
+    news_items:    newsResult.total,
+    whales:        whaleResult?.traders?.length ?? 0,
+    signals:       signals.length,
+    forming:       forming.length,
+    newsFlash:     newsOnly.length,
+    stops_closed:  stopResult.closed,
+    stops_alerted: stopResult.alerted,
     log,
   })
 }

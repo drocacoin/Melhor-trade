@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram, fmtSignal, fmtScanSummary, fmtStopAlert } from '@/lib/telegram'
+import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
+import { checkStopAlerts } from '@/lib/stop-monitor'
 import { computeThreshold } from '@/lib/threshold'
 import { loadWeights } from '@/lib/weights'
 import { generateSignalAnalysis } from '@/lib/signal-analysis'
@@ -324,61 +325,4 @@ function detectSignal(
   }
 }
 
-// ─── Alertas de stop e alvos ──────────────────────────────────────────────────
-async function checkStopAlerts(db: ReturnType<typeof supabaseAdmin>, openTrades: any[]) {
-  if (!openTrades.length) return
-
-  const assets = [...new Set(openTrades.map((t: any) => t.asset))] as Asset[]
-  const prices: Record<string, number> = {}
-  await Promise.all(assets.map(a => fetchLivePrice(a).then(p => { prices[a] = p })))
-
-  for (const trade of openTrades) {
-    const price  = prices[trade.asset]
-    const isLong = trade.direction === 'long'
-    if (!price) continue
-
-    // ── Alerta de stop próximo ──────────────────────────────────────────────
-    const stop = trade.stop_price ?? trade.stop_loss
-    if (stop) {
-      const range    = Math.abs(trade.entry_price - stop)
-      const toStop   = Math.abs(price - stop)
-      const distPct  = range > 0 ? (toStop / range) * 100 : 100
-      if (distPct <= 20) {
-        await sendTelegram(fmtStopAlert(trade.asset, trade.direction, price, stop, distPct))
-      }
-    }
-
-    // ── Alerta de alvo 1 atingido ───────────────────────────────────────────
-    if (trade.target1 && !trade.alerted_target1) {
-      const hit = isLong ? price >= trade.target1 : price <= trade.target1
-      if (hit) {
-        const pct = Math.abs((trade.target1 - trade.entry_price) / trade.entry_price * 100).toFixed(1)
-        await sendTelegram(
-          `🎯 <b>ALVO 1 ATINGIDO — ${trade.asset}</b>\n\n` +
-          `Posição: <b>${trade.direction.toUpperCase()}</b>\n` +
-          `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
-          `Alvo 1: <code>$${trade.target1}</code> (+${pct}%)\n\n` +
-          `💡 Considere fechar 50% da posição e mover stop para entrada.`
-        )
-        // Marca para não alertar novamente neste trade
-        await db.from('trades').update({ alerted_target1: true }).eq('id', trade.id)
-      }
-    }
-
-    // ── Alerta de alvo 2 atingido ───────────────────────────────────────────
-    if (trade.target2 && !trade.alerted_target2) {
-      const hit = isLong ? price >= trade.target2 : price <= trade.target2
-      if (hit) {
-        const pct = Math.abs((trade.target2 - trade.entry_price) / trade.entry_price * 100).toFixed(1)
-        await sendTelegram(
-          `🎯🎯 <b>ALVO 2 ATINGIDO — ${trade.asset}</b>\n\n` +
-          `Posição: <b>${trade.direction.toUpperCase()}</b>\n` +
-          `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
-          `Alvo 2: <code>$${trade.target2}</code> (+${pct}%)\n\n` +
-          `💡 Considere fechar mais 25% e deixar o restante correr com stop no alvo 1.`
-        )
-        await db.from('trades').update({ alerted_target2: true }).eq('id', trade.id)
-      }
-    }
-  }
-}
+// checkStopAlerts movido para @/lib/stop-monitor — compartilhado com scan-fast
