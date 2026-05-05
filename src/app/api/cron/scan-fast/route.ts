@@ -22,6 +22,7 @@ import { computeThreshold } from '@/lib/threshold'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
+import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
 import { Asset } from '@/types'
 
 export const maxDuration = 120
@@ -55,16 +56,20 @@ export async function GET(req: NextRequest) {
   const startedAt = Date.now()
 
   // ── 1. Contexto global em paralelo (sem whale — faz no paralelo abaixo) ───
-  const [fg, { data: perfRows }, { data: macroRow }, { data: openTrades }] =
+  const [fg, { data: perfRows }, { data: macroRow }, { data: openTrades }, { data: recentClosed }] =
     await Promise.all([
       fetchFearAndGreed().catch(() => null),
       db.from('performance_summary').select('*'),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
       db.from('trades').select('*').eq('status', 'open'),
+      db.from('trades').select('id,pnl_usd').eq('status', 'closed').order('closed_at', { ascending: false }).limit(10),
     ])
 
   const macro   = macroRow?.[0] ?? null
   const perfMap = Object.fromEntries((perfRows ?? []).map((p: any) => [p.asset, p]))
+
+  // ── Circuit breaker — bloqueia alertas SINAL se sistema em drawdown ────────
+  const cb = evaluateCircuitBreaker(recentClosed ?? [])
 
   // ── 2. Candles + Funding + Notícias + Baleias em paralelo ───────────────
   const [candleResults, fundingResults, newsResult, whaleResult] = await Promise.all([
@@ -236,7 +241,7 @@ export async function GET(req: NextRequest) {
     const priceStr = `$${snap4h.close.toFixed(asset === 'DOGE' ? 5 : asset === 'XRP' || asset === 'AVAX' ? 3 : 2)}`
 
     // ── Tipo 1: SINAL (score ≥ threshold) ───────────────────────────────────
-    if (topScore >= threshold && !alreadyActive.has(asset)) {
+    if (topScore >= threshold && !alreadyActive.has(asset) && !cb.triggered) {
       const newsTag   = newsAsset ? ` | 📰 ${newsAsset.sentiment}${influencerTag(newsAsset)}` : ''
       const whaleTag  = whale ? ` | 🐳 ${whale.sentiment}` : ''
       const tweetLine = newsAsset?.tweetCount
