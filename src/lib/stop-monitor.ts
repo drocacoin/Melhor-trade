@@ -91,20 +91,28 @@ export async function checkStopAlerts(
       }
     }
 
-    // ── 3. Alvo 1 ──────────────────────────────────────────────────────────
+    // ── 3. Alvo 1 — trailing stop para breakeven ─────────────────────────────
     if (trade.target1 && !trade.alerted_target1) {
       const hit = isLong ? price >= trade.target1 : price <= trade.target1
       if (hit) {
         const movePct = Math.abs((trade.target1 - entry) / entry * 100).toFixed(1)
         const pnl1    = ((isLong ? trade.target1 - entry : entry - trade.target1) / entry * 100 * lev).toFixed(1)
+
+        // Move stop para breakeven (entrada) automaticamente
+        await db.from('trades').update({
+          alerted_target1: true,
+          stop_price:      entry,   // trailing stop → breakeven
+          notes:           `[AUTO] Stop movido para breakeven $${entry} ao atingir alvo 1`,
+        }).eq('id', trade.id)
+
         await sendTelegram(
           `🎯 <b>ALVO 1 ATINGIDO — ${trade.asset}</b>\n\n` +
           `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
           `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
           `Alvo 1: <code>$${trade.target1}</code> (+${movePct}% move | P&L +${pnl1}%)\n\n` +
-          `💡 Feche 50% da posição e mova stop para entrada (breakeven).`
+          `🔄 <b>Stop movido para breakeven</b>: <code>$${entry}</code>\n` +
+          `💡 Feche 50% da posição para garantir o lucro.`
         )
-        await db.from('trades').update({ alerted_target1: true }).eq('id', trade.id)
         alerted++
       }
     }
