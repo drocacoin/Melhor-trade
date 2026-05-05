@@ -28,18 +28,23 @@ export async function GET(req: NextRequest) {
   const db = supabaseAdmin()
 
   // ── Contexto global ────────────────────────────────────────────────────────
-  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }] = await Promise.all([
+  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }, { data: recentClosed }] = await Promise.all([
     fetchFearAndGreed(),
     Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]))),
     db.from('performance_summary').select('*'),
     db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
     db.from('trades').select('*').eq('status', 'open'),
+    db.from('trades').select('id,pnl_usd,closed_at').eq('status', 'closed').order('closed_at', { ascending: false }).limit(10),
   ])
 
   const fundingMap  = Object.fromEntries(fundings)
   const perfMap: Record<string, any>  = {}
   for (const p of perfRows ?? []) perfMap[p.asset] = p
   const latestMacro = macroRow?.[0] ?? null
+
+  // ── Circuit breaker — pausa sinais em sequência de perdas ──────────────────
+  const cb = evaluateCircuitBreaker(recentClosed ?? [])
+  if (cb.triggered) console.warn('[scan] Circuit breaker ativo:', cb.reason)
 
   // Whale map vazio no scan — baleias são carregadas só no advisor (HL é instável)
   const whaleMap: Record<string, AssetSentiment> = {}
@@ -114,10 +119,10 @@ export async function GET(req: NextRequest) {
 
     if (snapshots['1d']?.bias) biases[asset] = snapshots['1d'].bias
 
-    // ── Detectar sinal com pesos dinâmicos ────────────────────────────────
+    // ── Detectar sinal com pesos dinâmicos (skip se circuit breaker ativo) ──
     const { threshold } = thresholds[asset]
     const weights = await loadWeights(asset)
-    const signal  = detectSignal(
+    const signal  = cb.triggered ? null : detectSignal(
       asset, snapshots, fg, threshold, weights, latestMacro, whaleMap,
       fundingMap[asset] ?? null,
       factors4h,
@@ -169,15 +174,25 @@ export async function GET(req: NextRequest) {
   await checkStopAlerts(db, openTrades ?? [])
 
   // ── Resumo Telegram ───────────────────────────────────────────────────────
-  if (sendSummary || newSignals > 0) {
+  if (sendSummary || newSignals > 0 || cb.triggered) {
     const nowBR = new Date().toLocaleString('pt-BR', {
       timeZone: 'America/Sao_Paulo',
       day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
     })
-    await sendTelegram(fmtScanSummary(biases, fg, fundingMap, thresholds, newSignals, nowBR))
+    await sendTelegram(fmtScanSummary(
+      biases, fg, fundingMap, thresholds, newSignals, nowBR,
+      cb.triggered ? { active: true, reason: cb.reason } : { active: false }
+    ))
   }
 
-  return NextResponse.json({ ok: true, scanned_at: new Date().toISOString(), fear_greed: fg, thresholds, results })
+  return NextResponse.json({
+    ok:              true,
+    scanned_at:      new Date().toISOString(),
+    fear_greed:      fg,
+    thresholds,
+    results,
+    circuit_breaker: cb.triggered ? { active: true, reason: cb.reason } : { active: false },
+  })
 }
 
 // ─── Detecção de sinal v2 — scoring por força + funding + ATR ────────────────
@@ -326,3 +341,43 @@ function detectSignal(
 }
 
 // checkStopAlerts movido para @/lib/stop-monitor — compartilhado com scan-fast
+
+// ─── Circuit breaker ──────────────────────────────────────────────────────────
+/**
+ * Avalia se o sistema deve pausar emissão de novos sinais.
+ * Critérios:
+ *  1. Últimas 5 operações: ≥4 perdas (≤20% WR) → breaker
+ *  2. Últimas 10 operações: WR < 25% → breaker
+ */
+function evaluateCircuitBreaker(
+  trades: { pnl_usd: number | null }[]
+): { triggered: boolean; reason: string } {
+  if (trades.length < 3) return { triggered: false, reason: '' }
+
+  const isWin = (t: any) => (t.pnl_usd ?? 0) > 0
+
+  // Regra 1: últimos 5 — ≥ 4 perdas
+  const last5   = trades.slice(0, 5)
+  const wins5   = last5.filter(isWin).length
+  const losses5 = last5.length - wins5
+  if (last5.length >= 5 && losses5 >= 4) {
+    return {
+      triggered: true,
+      reason:    `${losses5}/${last5.length} perdas nos últimos 5 trades (WR ${Math.round(wins5 / last5.length * 100)}%)`,
+    }
+  }
+
+  // Regra 2: últimos 10 — WR < 25%
+  const last10 = trades.slice(0, 10)
+  if (last10.length >= 10) {
+    const wr10 = last10.filter(isWin).length / last10.length
+    if (wr10 < 0.25) {
+      return {
+        triggered: true,
+        reason:    `WR ${Math.round(wr10 * 100)}% nos últimos 10 trades — abaixo de 25%`,
+      }
+    }
+  }
+
+  return { triggered: false, reason: '' }
+}

@@ -138,12 +138,13 @@ export function fmtSignal(
 }
 
 export function fmtScanSummary(
-  biases:     Record<string, string>,
-  fg:         { value: number; label: string } | null,
-  fundings:   Record<string, number | null>,
-  thresholds: Record<string, { threshold: number; reason: string }>,
-  newSignals: number,
-  now:        string
+  biases:         Record<string, string>,
+  fg:             { value: number; label: string } | null,
+  fundings:       Record<string, number | null>,
+  thresholds:     Record<string, { threshold: number; reason: string }>,
+  newSignals:     number,
+  now:            string,
+  circuitBreaker: { active: boolean; reason?: string } = { active: false }
 ): string {
   const lines = [`🔍 <b>Scan — ${now}</b>`, '']
 
@@ -164,12 +165,17 @@ export function fmtScanSummary(
     lines.push('', `📊 Fear &amp; Greed: ${fgEmoji} ${fg.value} — ${fg.label}`)
   }
 
-  lines.push(
-    '',
-    newSignals > 0
-      ? `🚨 <b>${newSignals} novo(s) sinal(is) detectado(s)!</b>`
-      : '✅ Sem novos sinais.',
-  )
+  if (circuitBreaker.active) {
+    lines.push('', `⛔ <b>Circuit Breaker Ativo</b> — ${circuitBreaker.reason ?? 'sequência de perdas'}`)
+    lines.push('Sinais pausados. Stop monitoring ativo.')
+  } else {
+    lines.push(
+      '',
+      newSignals > 0
+        ? `🚨 <b>${newSignals} novo(s) sinal(is) detectado(s)!</b>`
+        : '✅ Sem novos sinais.',
+    )
+  }
 
   return lines.join('\n')
 }
