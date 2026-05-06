@@ -181,6 +181,55 @@ export async function fetchFundingRate(asset: string): Promise<number | null> {
   } catch { return null }
 }
 
+// ─── Open Interest via HyperLiquid metaAndAssetCtxs ──────────────────────────
+// Um único request traz OI, volume 24h e markPx de TODOS os ativos HL.
+// OI em tokens × markPx = OI em USD.
+// crowdingRatio = oiUsd / dayVolumeUsd (quanto o OI é maior que o volume diário)
+export interface OIData {
+  oiUsd:          number   // Open Interest em USD
+  dayVolumeUsd:   number   // Volume notional 24h em USD
+  crowdingRatio:  number   // oiUsd / dayVolumeUsd  (>4 = alto, >6 = extremo)
+  markPx:         number
+}
+
+export async function fetchOpenInterestAll(): Promise<Record<string, OIData>> {
+  try {
+    const res  = await fetchWithTimeout('https://api.hyperliquid.xyz/info', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ type: 'metaAndAssetCtxs' }),
+    })
+    const json: [{ universe: { name: string }[] }, any[]] = await res.json()
+    const [meta, ctxs] = json
+    if (!Array.isArray(meta?.universe) || !Array.isArray(ctxs)) return {}
+
+    // Mapa inverso: símbolo HL → nossa chave (BTC, ETH, GOLD→PAXG, etc.)
+    const reverseMap = Object.fromEntries(
+      Object.entries(HL_SYMBOL).map(([k, v]) => [v, k])
+    )
+
+    const result: Record<string, OIData> = {}
+    for (let i = 0; i < meta.universe.length; i++) {
+      const hlName = meta.universe[i]?.name
+      const ctx    = ctxs[i]
+      if (!hlName || !ctx) continue
+      const ourKey = reverseMap[hlName]
+      if (!ourKey) continue
+
+      const markPx        = parseFloat(ctx.markPx        ?? '0')
+      const oiTokens      = parseFloat(ctx.openInterest  ?? '0')
+      const dayVolumeUsd  = parseFloat(ctx.dayNtlVlm     ?? '0')
+      const oiUsd         = oiTokens * markPx
+      const crowdingRatio = dayVolumeUsd > 0 ? oiUsd / dayVolumeUsd : 0
+
+      result[ourKey] = { oiUsd, dayVolumeUsd, crowdingRatio, markPx }
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
+
 // ─── Fear & Greed Index ───────────────────────────────────────────────────────
 export async function fetchFearAndGreed(): Promise<{ value: number; label: string } | null> {
   try {

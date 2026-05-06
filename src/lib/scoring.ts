@@ -4,11 +4,13 @@
  *
  * Reutilizado no Dashboard e na API /api/advisor.
  *
- * Melhorias v2:
+ * Melhorias v3:
  *  - WaveTrend por profundidade (não só zona binária)
  *  - EMA 200 como fator de tendência de longo prazo
  *  - Funding rate como penalidade de trades lotados
+ *  - Open Interest crowding: OI/volume ratio como sinal de saturação
  */
+import type { OIData } from '@/lib/fetcher'
 
 export interface LiveScore {
   bullScore:   number
@@ -28,6 +30,7 @@ export function computeLiveScore(
   snaps:   Record<string, any>,
   fg:      { value: number; label: string } | null = null,
   funding: number | null = null,      // funding rate em decimal (0.0001 = 0.01%/8h)
+  oi:      OIData | null = null,      // Open Interest data do HL
 ): LiveScore {
   const d  = snaps['1d']
   const h4 = snaps['4h']
@@ -115,9 +118,34 @@ export function computeLiveScore(
     }
   }
 
+  // ── Open Interest crowding (v3) ──────────────────────────────────────────
+  // crowdingRatio = OI / volume 24h.  >4 = alto, >6 = extremo.
+  // Combinado com funding indica saturação direcional.
+  if (oi !== null && oi.crowdingRatio > 0) {
+    const cr = oi.crowdingRatio
+    const fmtOI = oi.oiUsd >= 1e9
+      ? `$${(oi.oiUsd / 1e9).toFixed(1)}B`
+      : `$${(oi.oiUsd / 1e6).toFixed(0)}M`
+
+    if (cr > 4 && funding !== null && funding > 0.0003) {
+      // OI alto + funding positivo = longs muito lotados
+      const pen = cr > 6 ? 1.5 : 1
+      bullScore -= pen
+      factors.push({ label: `OI crowding ${cr.toFixed(1)}× vol (${fmtOI}) + funding alto → longs saturados`, bull: false, bear: false, points: -pen })
+    } else if (cr > 4 && funding !== null && funding < -0.0002) {
+      // OI alto + funding negativo = shorts muito lotados → squeeze risk
+      const pen = cr > 6 ? 1.5 : 1
+      bearScore -= pen
+      factors.push({ label: `OI crowding ${cr.toFixed(1)}× vol (${fmtOI}) + funding neg → shorts saturados`, bull: false, bear: false, points: -pen })
+    } else if (cr > 6) {
+      // OI extremo sem funding decisivo = mercado sobrecarregado (move brusco esperado)
+      factors.push({ label: `OI extremo ${cr.toFixed(1)}× vol (${fmtOI}) — move violento possível`, bull: false, bear: false, points: 0 })
+    }
+  }
+
   const topScore    = Math.max(bullScore, bearScore)
   const direction   = bullScore > bearScore ? 'bull' : bearScore > bullScore ? 'bear' : 'neutral'
-  const maxPossible = 13  // v2: 4 (WT) + 2 (BOS) + 1 (cloud) + 1 (tenkan) + 2 (bias) + 1 (wk) + 2 (EMA) = ~13
+  const maxPossible = 13  // v3: mesma base + OI como penalidade (não adiciona ao máximo)
 
   return { bullScore, bearScore, direction, topScore, maxPossible, factors }
 }

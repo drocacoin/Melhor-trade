@@ -7,7 +7,7 @@
  */
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { fetchFearAndGreed, fetchLivePrice, fetchFundingRate } from '@/lib/fetcher'
+import { fetchFearAndGreed, fetchLivePrice, fetchFundingRate, fetchOpenInterestAll } from '@/lib/fetcher'
 import { computeLiveScore } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { fetchWhaleSentiment } from '@/lib/whales'
@@ -36,6 +36,7 @@ export async function POST() {
       whaleSentiment,
       newsResult,
       fundingPairs,
+      oiMap,
     ] = await Promise.all([
       fetchFearAndGreed().catch(() => null),
       db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
@@ -48,6 +49,7 @@ export async function POST() {
       fetchWhaleSentiment().catch(() => null),
       fetchNewsSentiment().catch(() => null),
       Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]).catch(() => [a, null] as [string, null]))),
+      fetchOpenInterestAll().catch(() => ({})),
     ])
 
     const macro      = macroRow?.[0] ?? null
@@ -67,9 +69,10 @@ export async function POST() {
         latestSnaps.filter((s: any) => s.asset === asset).map((s: any) => [s.timeframe, s])
       )
       const funding = (fundingMap as Record<string, number | null>)[asset] ?? null
-      const score   = computeLiveScore(byTf, fg, funding)
+      const oi      = (oiMap as any)?.[asset] ?? null
+      const score   = computeLiveScore(byTf, fg, funding, oi)
       const thr     = computeThreshold(perfMap[asset])
-      return { asset, ...score, threshold: thr.threshold, gap: thr.threshold - score.topScore, funding }
+      return { asset, ...score, threshold: thr.threshold, gap: thr.threshold - score.topScore, funding, oi }
     }).sort((a, b) => a.gap - b.gap)
 
     // ── 3. Preços ao vivo — fail-safe por ativo ─────────────────────────────
@@ -105,10 +108,13 @@ export async function POST() {
 
     const scoresText = scoresForPrompt.map(s => {
       const fundingTag = s.funding != null
-        ? ` | funding ${s.funding > 0 ? '+' : ''}${(s.funding * 100).toFixed(3)}%`
+        ? ` | FR ${s.funding > 0 ? '+' : ''}${(s.funding * 100).toFixed(3)}%`
+        : ''
+      const oiTag = s.oi?.oiUsd
+        ? ` | OI ${s.oi.oiUsd >= 1e9 ? `$${(s.oi.oiUsd / 1e9).toFixed(1)}B` : `$${(s.oi.oiUsd / 1e6).toFixed(0)}M`} (${s.oi.crowdingRatio.toFixed(1)}×)`
         : ''
       const status = s.gap <= 0 ? '🚨 SINAL' : `falta ${s.gap.toFixed(1)}pts`
-      return `${s.asset}: bull=${s.bullScore.toFixed(1)} bear=${s.bearScore.toFixed(1)} thr=${s.threshold} (${status})${fundingTag}`
+      return `${s.asset}: bull=${s.bullScore.toFixed(1)} bear=${s.bearScore.toFixed(1)} thr=${s.threshold} (${status})${fundingTag}${oiTag}`
     }).join('\n')
 
     const openText = (openTrades ?? []).length

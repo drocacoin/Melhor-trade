@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchCandles, fetchFearAndGreed, fetchFundingRate } from '@/lib/fetcher'
+import { fetchCandles, fetchFearAndGreed, fetchFundingRate, fetchOpenInterestAll } from '@/lib/fetcher'
 import { fetchWhaleSentiment } from '@/lib/whales'
 import { fetchNewsSentiment } from '@/lib/news'
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
@@ -71,8 +71,8 @@ export async function GET(req: NextRequest) {
   // ── Circuit breaker — bloqueia alertas SINAL se sistema em drawdown ────────
   const cb = evaluateCircuitBreaker(recentClosed ?? [])
 
-  // ── 2. Candles + Funding + Notícias + Baleias em paralelo ───────────────
-  const [candleResults, fundingResults, newsResult, whaleResult] = await Promise.all([
+  // ── 2. Candles + Funding + OI + Notícias + Baleias em paralelo ──────────
+  const [candleResults, fundingResults, oiAll, newsResult, whaleResult] = await Promise.all([
     Promise.allSettled(
       FAST_ASSETS.map(async asset => {
         const [r4h, r1h] = await Promise.allSettled([
@@ -93,6 +93,7 @@ export async function GET(req: NextRequest) {
       })
     ),
     Promise.all(FAST_ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]).catch(() => [a, null] as [string, null]))),
+    fetchOpenInterestAll().catch(() => ({})),
     fetchNewsSentiment().catch(() => ({ items: [], byAsset: {} as Record<string, any>, total: 0, fetchedAt: '', sources: [] as string[] })),
     fetchWhaleSentiment().catch(() => null),
   ])
@@ -198,12 +199,19 @@ export async function GET(req: NextRequest) {
       if (fg.value <= 20) bearScore -= 1
     }
 
-    // Funding rate (novo)
+    // Funding rate
     if (funding !== null) {
       if (funding > 0.0007)       { bullScore -= 2;    bearScore += 0.3 }
       else if (funding > 0.0004)  { bullScore -= 1 }
       if (funding < -0.0005)      { bearScore -= 1.5;  bullScore += 0.3 }
       else if (funding < -0.0002) { bearScore -= 0.5 }
+    }
+
+    // OI crowding — combinado com funding indica saturação direcional
+    const oi = (oiAll as any)?.[asset]
+    if (oi && oi.crowdingRatio > 0 && funding !== null) {
+      if (oi.crowdingRatio > 4 && funding > 0.0003)  bullScore -= oi.crowdingRatio > 6 ? 1.5 : 1
+      if (oi.crowdingRatio > 4 && funding < -0.0002) bearScore -= oi.crowdingRatio > 6 ? 1.5 : 1
     }
 
     // Baleias

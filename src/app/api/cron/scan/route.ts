@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice } from '@/lib/fetcher'
+import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice, fetchOpenInterestAll, OIData } from '@/lib/fetcher'
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
@@ -30,9 +30,10 @@ export async function GET(req: NextRequest) {
   const db = supabaseAdmin()
 
   // ── Contexto global ────────────────────────────────────────────────────────
-  const [fg, fundings, { data: perfRows }, { data: macroRow }, { data: openTrades }, { data: recentClosed }] = await Promise.all([
+  const [fg, fundings, oiAll, { data: perfRows }, { data: macroRow }, { data: openTrades }, { data: recentClosed }] = await Promise.all([
     fetchFearAndGreed(),
     Promise.all(ASSETS.map(a => fetchFundingRate(a).then(v => [a, v] as [string, number | null]))),
+    fetchOpenInterestAll().catch(() => ({} as Record<string, OIData>)),
     db.from('performance_summary').select('*'),
     db.from('macro_readings').select('*').order('captured_at', { ascending: false }).limit(1),
     db.from('trades').select('*').eq('status', 'open'),
@@ -139,6 +140,7 @@ export async function GET(req: NextRequest) {
       asset, snapshots, fg, threshold, weights, latestMacro, whaleMap,
       fundingMap[asset] ?? null,
       factors4h,
+      (oiAll as Record<string, OIData>)[asset] ?? null,
     )
 
     if (signal) {
@@ -219,6 +221,7 @@ function detectSignal(
   whaleMap: Record<string, AssetSentiment> = {},
   funding:  number | null = null,
   f4h:      SignalFactors | null = null,    // fatores do 4h ao vivo
+  oi:       OIData | null = null,           // Open Interest data
 ) {
   const d  = snaps['1d']
   const h4 = snaps['4h']
@@ -292,6 +295,13 @@ function detectSignal(
     else if (funding > 0.0004)  { bullScore -= 1 }                         // longs lotados
     if (funding < -0.0005)      { bearScore -= 1.5;  bullScore += 0.3 }   // shorts lotados → squeeze
     else if (funding < -0.0002) { bearScore -= 0.5 }
+  }
+
+  // ── Open Interest crowding — saturação direcional ────────────────────────
+  // crowdingRatio = oiUsd / vol24h. >4 = alto, >6 = extremo
+  if (oi !== null && oi.crowdingRatio > 4) {
+    if (funding !== null && funding > 0.0003)   bullScore -= oi.crowdingRatio > 6 ? 1.5 : 1
+    if (funding !== null && funding < -0.0002)  bearScore -= oi.crowdingRatio > 6 ? 1.5 : 1
   }
 
   // ── Baleias HyperLiquid ───────────────────────────────────────────────────
