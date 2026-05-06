@@ -21,7 +21,6 @@
  */
 
 import { fetchLivePrice } from '@/lib/fetcher'
-import { sendTelegram, fmtStopAlert } from '@/lib/telegram'
 import { supabaseAdmin } from '@/lib/supabase'
 import { logEvent } from '@/lib/logger'
 import { Asset } from '@/types'
@@ -115,35 +114,16 @@ export async function checkStopAlerts(
           partial_price: hasPartial ? trade.partial_close_1_price : null,
         }, trade.asset)
 
-        const pnlStr =
-          `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%` +
-          (pnlUsd !== null ? ` (${ pnlUsd >= 0 ? '+' : ''}${pnlUsd.toFixed(0)})` : '')
-
-        const partialLine = hasPartial
-          ? `\n📤 Parcial 50%: <code>$${trade.partial_close_1_price}</code> (+${(trade.partial_close_1_pnl_pct ?? 0).toFixed(1)}%) já registrado`
-          : ''
-
-        await sendTelegram(
-          `🛑 <b>STOP ATINGIDO — ${trade.asset}</b>\n\n` +
-          `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
-          `Entrada: <code>$${entry}</code> → Stop: <code>$${stop}</code>\n` +
-          `Fechado em: <code>$${price.toFixed(2)}</code>\n` +
-          `P&L: <b>${pnlStr}</b>${hasPartial ? ' (blended 50%+50%)' : ''}\n` +
-          `${partialLine}\n\n` +
-          `⚡ Trade fechado automaticamente.`
-        )
-
         closed++
         continue  // pula demais checks para este trade
       }
 
-      // ── 2. Stop próximo (< 20% do range restante) ───────────────────────
+      // ── 2. Stop próximo — apenas registra, sem Telegram ─────────────────
       const range   = Math.abs(entry - stop)
       const toStop  = Math.abs(price - stop)
       const distPct = range > 0 ? (toStop / range) * 100 : 100
       if (distPct <= 20) {
-        await sendTelegram(fmtStopAlert(trade.asset, trade.direction, price, stop, distPct))
-        alerted++
+        alerted++  // contabiliza para o log JSON, sem enviar Telegram
       }
     }
 
@@ -154,16 +134,15 @@ export async function checkStopAlerts(
         const pnl1Pct = +((isLong
           ? trade.target1 - entry
           : entry - trade.target1) / entry * 100 * lev).toFixed(2)
-        const movePct = Math.abs((trade.target1 - entry) / entry * 100).toFixed(1)
         const pnl1Usd = trade.size != null
           ? +(trade.size * 0.5 * (pnl1Pct / lev / 100)).toFixed(2)
           : null
 
-        // Grava parcial + move stop para breakeven
+        // Grava parcial + move stop para breakeven (silencioso — sem Telegram)
         await db.from('trades').update({
           alerted_target1:         true,
-          stop_price:              entry,          // trailing stop → breakeven
-          partial_close_1_price:   price,          // preço real de execução
+          stop_price:              entry,
+          partial_close_1_price:   price,
           partial_close_1_pct:     50,
           partial_close_1_pnl_pct: pnl1Pct,
           partial_close_1_at:      new Date().toISOString(),
@@ -183,36 +162,14 @@ export async function checkStopAlerts(
           new_stop:          entry,
         }, trade.asset)
 
-        const usdLine = pnl1Usd != null
-          ? ` (+$${pnl1Usd.toFixed(0)} na metade)`
-          : ''
-
-        await sendTelegram(
-          `📤 <b>ALVO 1 — FECHE 50% AGORA — ${trade.asset}</b>\n\n` +
-          `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
-          `Preço: <code>$${price.toFixed(2)}</code> | Alvo 1: <code>$${trade.target1}</code>\n` +
-          `Move: +${movePct}% | P&L parcial: <b>+${pnl1Pct}%</b>${usdLine}\n\n` +
-          `✅ Parcial registrado automaticamente no sistema\n` +
-          `🔄 Stop movido para <b>breakeven</b>: <code>$${entry}</code>\n\n` +
-          `📊 Restante: 50% aberto sem risco | aguarda alvo 2 ou trailing stop`
-        )
         alerted++
       }
     }
 
-    // ── 4. Alvo 2 ──────────────────────────────────────────────────────────
+    // ── 4. Alvo 2 — apenas grava flag, sem Telegram ───────────────────────
     if (trade.target2 && !trade.alerted_target2) {
       const hit = isLong ? price >= trade.target2 : price <= trade.target2
       if (hit) {
-        const movePct = Math.abs((trade.target2 - entry) / entry * 100).toFixed(1)
-        const pnl2    = ((isLong ? trade.target2 - entry : entry - trade.target2) / entry * 100 * lev).toFixed(1)
-        await sendTelegram(
-          `🎯🎯 <b>ALVO 2 ATINGIDO — ${trade.asset}</b>\n\n` +
-          `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
-          `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
-          `Alvo 2: <code>$${trade.target2}</code> (+${movePct}% move | P&L +${pnl2}%)\n\n` +
-          `💡 Pode fechar os ${hasPartial ? '50%' : '25%'} restantes ou manter até alvo 3.`
-        )
         await db.from('trades').update({ alerted_target2: true }).eq('id', trade.id)
         alerted++
       }

@@ -14,7 +14,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram } from '@/lib/telegram'
 
 const FACTORS = [
   { key: 'wt_cross_oversold',   label: 'WT cruzado + oversold (4h)' },
@@ -285,15 +284,6 @@ ${changeLines}`,
       })
       .join('\n')
 
-    const hvSummary = inconsistentCount > 0
-      ? `\n⚠️ ${inconsistentCount} fator(es) com holdout inconsistente — pesos suavizados`
-      : `\n✅ Todos os fatores validados no holdout`
-
-    await sendTelegram(
-      `🧠 <b>Sistema evoluiu</b> (treino: ${trainTrades.length} | holdout: ${holdoutTrades.length})\n\n` +
-      `${topChanges}${hvSummary}\n\n` +
-      (aiInsights ? `💡 <i>${aiInsights}</i>` : '')
-    )
   }
 
   return NextResponse.json({

@@ -7,7 +7,6 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram } from '@/lib/telegram'
 import Anthropic from '@anthropic-ai/sdk'
 
 export const maxDuration = 60
@@ -56,8 +55,6 @@ export async function GET(req: NextRequest) {
   }
 
   if (!trades?.length) {
-    const msg = `📔 <b>Journal ${month}</b>\n\nNenhum trade fechado em ${month}.`
-    await sendTelegram(msg)
     return NextResponse.json({ ok: true, month, trades: 0 })
   }
 
@@ -197,8 +194,6 @@ export async function GET(req: NextRequest) {
     `🏆 Melhor: ${bestAsset ?? '—'} | 💀 Pior: ${worstAsset ?? '—'}\n\n` +
     (narrative ? `<i>${narrative}</i>\n\n` : '') +
     (hlLines ? `<b>Insights:</b>\n${hlLines}` : '')
-
-  await sendTelegram(telegramMsg)
 
   return NextResponse.json({ ok: true, month, trades: trades.length, winrate, total_pnl: totalPnl, narrative, highlights })
 }

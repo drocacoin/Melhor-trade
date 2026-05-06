@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram } from '@/lib/telegram'
 
 export async function GET(req: NextRequest) {
   const bearer = req.headers.get('authorization')?.replace('Bearer ', '')
@@ -30,10 +29,6 @@ export async function GET(req: NextRequest) {
 
   // ── Sem trades na semana ───────────────────────────────────────────────────
   if (closedTrades.length === 0 && weekSignals.length === 0) {
-    await sendTelegram(
-      `📅 <b>Digest Semanal</b>\n\nNenhum trade fechado e nenhum sinal esta semana.\n\n` +
-      `Continue monitorando — o mercado oferecerá oportunidades.`
-    )
     return NextResponse.json({ ok: true, message: 'no data' })
   }
 
@@ -126,8 +121,6 @@ Seja honesto, construtivo e específico. Use os dados reais.`
       ``,
       `👉 Abrir Journal para análise completa`,
     ].join('\n')
-
-    await sendTelegram(tgMsg)
 
     return NextResponse.json({ ok: true, winRate, totalPnl, analysis })
   } catch (e: any) {

@@ -14,7 +14,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram } from '@/lib/telegram'
 import { fetchFearAndGreed } from '@/lib/fetcher'
 
 export const maxDuration = 60
@@ -180,12 +179,6 @@ Explique o que esses dados significam para swing trade e se o ambiente favorece 
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-
-  await sendTelegram(
-    `${regimeEmoji[regime] ?? '⚪'} <b>Macro — ${regime.toUpperCase()} (score ${scoreStr})</b>\n\n` +
-    `DXY ${dxy.toFixed(2)} ${dxyArrow}  ·  Yields ${yields.toFixed(2)}% ${yieldsArrow}  ·  VIX ${vix.toFixed(1)}\n\n` +
-    `💡 <i>${safeNotes}</i>`
-  )
 
   return NextResponse.json({
     ok:    true,

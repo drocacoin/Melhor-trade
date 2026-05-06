@@ -3,7 +3,7 @@ import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice, fetc
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
 import { scoreToConfidence } from '@/lib/scoring'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
+import { sendTelegram, fmtSignal } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
 import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
 import { logEvent, wasCbLoggedRecently } from '@/lib/logger'
@@ -189,17 +189,6 @@ export async function GET(req: NextRequest) {
   // ── Alertas de stop ───────────────────────────────────────────────────────
   await checkStopAlerts(db, openTrades ?? [])
 
-  // ── Resumo Telegram ───────────────────────────────────────────────────────
-  if (sendSummary || newSignals > 0 || cb.triggered) {
-    const nowBR = new Date().toLocaleString('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-    })
-    await sendTelegram(fmtScanSummary(
-      biases, fg, fundingMap, thresholds, newSignals, nowBR,
-      cb.triggered ? { active: true, reason: cb.reason } : { active: false }
-    ))
-  }
 
   return NextResponse.json({
     ok:              true,

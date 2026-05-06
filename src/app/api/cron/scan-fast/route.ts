@@ -21,7 +21,6 @@ import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indi
 import { scoreToConfidence } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendTelegram } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
 import { evaluateCircuitBreaker } from '@/lib/circuit-breaker'
 import { Asset } from '@/types'
@@ -312,32 +311,8 @@ export async function GET(req: NextRequest) {
   const forming  = alertBucket.filter(a => a.type === 'forming')
   const newsOnly = alertBucket.filter(a => a.type === 'news')
 
-  if (signals.length) {
-    const h = new Date().toLocaleString('pt-BR', {
-      timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit',
-    })
-    await sendTelegram(
-      `🚨 <b>SINAIS — ${h}</b>\n\n` +
-      signals.map(a => a.text).join('\n\n') +
-      `\n\n<i>Use /analisar para análise completa.</i>`
-    )
-  }
-
-  if (forming.length) {
-    await sendTelegram(
-      `👁 <b>SETUPS FORMANDO</b>\n` +
-      `<i>Técnico + confirmação externa — antecipação</i>\n\n` +
-      forming.map(a => a.text).join('\n\n')
-    )
-  }
-
-  if (newsOnly.length) {
-    await sendTelegram(
-      `⚡ <b>NEWS FLASH</b>\n` +
-      `<i>Notícia relevante antes do setup técnico completar</i>\n\n` +
-      newsOnly.map(a => a.text).join('\n\n')
-    )
-  }
+  // Alertas do scan-fast são silenciosos — somente o scan completo envia sinal
+  // com racional completo. Dados ficam disponíveis via comandos (/scores, /analisar).
 
   // ── 7. Monitor de stops/alvos (30min = mais responsivo que o scan 1h) ───────
   const stopResult = await checkStopAlerts(db, openTrades ?? [])
