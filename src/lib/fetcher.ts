@@ -78,7 +78,48 @@ function aggregateTo4h(candles: OHLCV[]): OHLCV[] {
   return result
 }
 
-// ─── Yahoo Finance — OIL (BZ=F), SP500 (SPY), MSTR ──────────────────────────
+// ─── Bybit perpetuals — OIL, SP500, MSTR (24/7, sem depender de pregão) ──────
+// Estes ativos têm perpetuals tokenizados no Bybit que operam continuamente,
+// evitando candles estagnados fora do horário de mercado tradicional.
+const BYBIT_PERP_SYMBOL: Record<string, string> = {
+  OIL:   'OILUSDT',    // WTI crude oil perpetual
+  SP500: 'SP500USDT',  // S&P 500 index perpetual
+  MSTR:  'MSTRUSDTM',  // MicroStrategy tokenized perpetual
+}
+
+const BYBIT_TF_INTERVAL: Record<string, string> = {
+  '1wk': 'W',
+  '1d':  'D',
+  '4h':  '240',
+  '1h':  '60',
+}
+
+async function fetchCandlesBybit(asset: string, timeframe: string): Promise<OHLCV[]> {
+  const symbol   = BYBIT_PERP_SYMBOL[asset]
+  const interval = BYBIT_TF_INTERVAL[timeframe]
+  if (!symbol || !interval) throw new Error(`Bybit: ativo desconhecido ${asset}/${timeframe}`)
+
+  const lookback = HL_LOOKBACK[timeframe]
+  const end      = Date.now()
+  const start    = end - lookback
+
+  const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&start=${start}&end=${end}&limit=200`
+  const res  = await fetchWithTimeout(url)
+  const json = await res.json()
+  const list: string[][] = json?.result?.list ?? []
+  if (!list.length) throw new Error(`Bybit resposta vazia para ${asset} ${timeframe}`)
+
+  // Bybit retorna da mais recente para a mais antiga — reverter para ordem cronológica
+  return list.reverse().map(r => ({
+    open:   parseFloat(r[1]),
+    high:   parseFloat(r[2]),
+    low:    parseFloat(r[3]),
+    close:  parseFloat(r[4]),
+    volume: parseFloat(r[5]),
+  }))
+}
+
+// ─── Yahoo Finance — fallback para ativos sem perpetual 24/7 ─────────────────
 // query2 funciona de servidores — query1 bloqueia IPs de cloud.
 const YAHOO_SYMBOL: Record<string, string> = {
   OIL:   'BZ=F',
@@ -125,14 +166,25 @@ async function fetchCandlesYahoo(asset: string, timeframe: string): Promise<OHLC
 }
 
 // ─── Unified candle fetch ─────────────────────────────────────────────────────
+// Prioridade: HyperLiquid → Bybit perpetual → Yahoo Finance (fallback)
 export async function fetchCandles(asset: string, timeframe: string): Promise<OHLCV[]> {
-  if (HL_SYMBOL[asset])    return fetchCandlesHL(asset, timeframe)
+  if (HL_SYMBOL[asset]) return fetchCandlesHL(asset, timeframe)
+
+  // Bybit 24/7 perpetuals — tenta primeiro; cai para Yahoo se falhar
+  if (BYBIT_PERP_SYMBOL[asset]) {
+    try {
+      const candles = await fetchCandlesBybit(asset, timeframe)
+      if (candles.length >= 30) return candles
+    } catch { /* fallthrough para Yahoo */ }
+  }
+
   if (YAHOO_SYMBOL[asset]) return fetchCandlesYahoo(asset, timeframe)
   throw new Error(`Unknown asset: ${asset}`)
 }
 
 // ─── Live price ───────────────────────────────────────────────────────────────
 export async function fetchLivePrice(asset: string): Promise<number> {
+  // HyperLiquid — batch allMids para crypto
   if (HL_SYMBOL[asset]) {
     try {
       const res  = await fetchWithTimeout('https://api.hyperliquid.xyz/info', {
@@ -145,6 +197,20 @@ export async function fetchLivePrice(asset: string): Promise<number> {
     } catch { return 0 }
   }
 
+  // Bybit perpetuals — 24/7 para OIL, SP500, MSTR
+  if (BYBIT_PERP_SYMBOL[asset]) {
+    try {
+      const symbol = BYBIT_PERP_SYMBOL[asset]
+      const res    = await fetchWithTimeout(
+        `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`
+      )
+      const json  = await res.json()
+      const price = parseFloat(json?.result?.list?.[0]?.lastPrice ?? '0')
+      if (price > 0) return price
+    } catch { /* fallthrough */ }
+  }
+
+  // Yahoo Finance — fallback se Bybit falhar
   if (YAHOO_SYMBOL[asset]) {
     try {
       const res = await fetchWithTimeout(

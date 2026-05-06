@@ -16,37 +16,8 @@ import { Asset } from '@/types'
 
 export const maxDuration = 300  // Vercel Pro — até 5 min por execução
 
-const ALL_ASSETS: Asset[] = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
-const TIMEFRAMES          = ['1wk', '1d', '4h', '1h']
-
-/**
- * Filtra ativos tradicionais fora do horário de mercado para evitar sinais
- * baseados em candles estagnados (sem volume real).
- *
- * SP500 / MSTR  → apenas Seg-Sex 13:30-21:00 UTC (pregão NYSE)
- * GOLD / OIL    → 24/5 — fecha Sáb 21:00 UTC a Dom 23:00 UTC
- */
-function getActiveAssets(): Asset[] {
-  const now     = new Date()
-  const utcDay  = now.getUTCDay()    // 0=Dom, 1=Seg…6=Sáb
-  const utcHour = now.getUTCHours()
-  const utcMin  = now.getUTCMinutes()
-  const utcDecimal = utcHour + utcMin / 60  // hora decimal para comparar com 13.5
-
-  // Pregão US: Seg(1) a Sex(5), das 13:30 às 21:00 UTC
-  const usMarketOpen = utcDay >= 1 && utcDay <= 5 &&
-                       utcDecimal >= 13.5 && utcDecimal < 21.0
-
-  // Commodities fecham: Sáb >= 21:00 UTC  OU  Dom < 23:00 UTC
-  const commodityClosed = (utcDay === 6 && utcHour >= 21) ||
-                          (utcDay === 0 && utcHour < 23)
-
-  const skip = new Set<Asset>()
-  if (!usMarketOpen)   { skip.add('SP500'); skip.add('MSTR') }
-  if (commodityClosed) { skip.add('GOLD');  skip.add('OIL')  }
-
-  return ALL_ASSETS.filter(a => !skip.has(a))
-}
+const ASSETS: Asset[]  = ['BTC', 'ETH', 'SOL', 'HYPE', 'AAVE', 'LINK', 'AVAX', 'GOLD', 'OIL', 'SP500', 'MSTR', 'XRP', 'SUI', 'DOGE', 'TAO']
+const TIMEFRAMES       = ['1wk', '1d', '4h', '1h']
 
 export async function GET(req: NextRequest) {
   const bearer = req.headers.get('authorization')?.replace('Bearer ', '')
@@ -57,8 +28,7 @@ export async function GET(req: NextRequest) {
 
   const sendSummary = req.nextUrl.searchParams.get('send_summary') === 'true'
 
-  const db     = supabaseAdmin()
-  const ASSETS = getActiveAssets()  // filtra mercados fechados
+  const db = supabaseAdmin()
 
   // ── Contexto global ────────────────────────────────────────────────────────
   const [fg, fundings, oiAll, { data: perfRows }, { data: macroRow }, { data: openTrades }, { data: recentClosed }] = await Promise.all([
@@ -229,15 +199,12 @@ export async function GET(req: NextRequest) {
   await checkStopAlerts(db, openTrades ?? [])
 
 
-  const skippedAssets = ALL_ASSETS.filter(a => !ASSETS.includes(a))
-
   return NextResponse.json({
     ok:              true,
     scanned_at:      new Date().toISOString(),
     fear_greed:      fg,
     thresholds,
     results,
-    skipped_assets:  skippedAssets.length ? skippedAssets : undefined,
     circuit_breaker: cb.triggered ? { active: true, reason: cb.reason } : { active: false },
   })
 }
