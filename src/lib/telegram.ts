@@ -42,6 +42,14 @@ export function fmtSignal(
     '',
   ]
 
+  // ── Warning de WR histórico baixo ─────────────────────────────────────
+  if (signal.low_wr_warning && signal.history) {
+    lines.push(
+      `⚠️ <b>ATENÇÃO:</b> WR histórico <b>${signal.history.winRate}%</b> neste setup (${signal.history.totalTrades} trades) — reduza o tamanho.`,
+      '',
+    )
+  }
+
   // ── Confluência de timeframes ──────────────────────────────────────────
   if (signal.confluence) {
     lines.push(`📊 Confluência: ${signal.confluence.visual}`)
@@ -201,6 +209,61 @@ export function fmtStopAlert(
     '',
     `⚡ Aja rápido — gerencie sua posição.`,
   ].join('\n')
+}
+
+/** Alerta quando alvo 1 é atingido — pede para fechar 50% */
+export function fmtTarget1Hit(
+  asset:     string,
+  direction: string,
+  price:     number,
+  pnl1Pct:   number,
+  newStop:   number,
+  pnl1Usd:   number | null,
+): string {
+  const sign   = pnl1Pct >= 0 ? '+' : ''
+  const usdStr = pnl1Usd != null ? ` (+$${pnl1Usd.toFixed(2)})` : ''
+  return [
+    `🎯 <b>ALVO 1 ATINGIDO — ${asset} ${direction.toUpperCase()}</b>`,
+    ``,
+    `Feche <b>50% agora</b> em <code>$${price.toFixed(2)}</code>${usdStr}`,
+    `P&amp;L parcial: <b>${sign}${pnl1Pct.toFixed(2)}%</b>`,
+    ``,
+    `🔒 Stop movido para <b>breakeven</b> → <code>$${newStop.toFixed(2)}</code>`,
+    `Os 50% restantes agora têm <b>risco zero</b>.`,
+    ``,
+    `👉 Feche metade e deixe correr para o Alvo 2.`,
+  ].join('\n')
+}
+
+/** Alerta quando stop é atingido e posição é fechada automaticamente */
+export function fmtStopClosed(
+  asset:      string,
+  direction:  string,
+  price:      number,
+  pnlPct:     number,
+  pnlUsd:     number | null,
+  hadPartial: boolean,
+  partialPrice?: number,
+  partialPnlPct?: number,
+): string {
+  const sign    = pnlPct >= 0 ? '+' : ''
+  const usdStr  = pnlUsd != null ? ` (${pnlUsd >= 0 ? '+' : ''}$${pnlUsd.toFixed(2)})` : ''
+  const emoji   = pnlPct >= 0 ? '💚' : '🔴'
+  const lines = [
+    `🛑 <b>STOP AUTO-CLOSE — ${asset} ${direction.toUpperCase()}</b>`,
+    ``,
+    `Posição fechada em <code>$${price.toFixed(2)}</code>`,
+    `P&amp;L total: ${emoji} <b>${sign}${pnlPct.toFixed(2)}%</b>${usdStr}`,
+  ]
+  if (hadPartial && partialPrice != null && partialPnlPct != null) {
+    const pSign = partialPnlPct >= 0 ? '+' : ''
+    lines.push(
+      ``,
+      `<i>P&amp;L blended: parcial 50% @ $${partialPrice.toFixed(2)} (${pSign}${partialPnlPct.toFixed(2)}%) + stop 50% @ $${price.toFixed(2)}</i>`,
+    )
+  }
+  lines.push(``, `👉 Trade encerrado. Abra o app para revisar.`)
+  return lines.join('\n')
 }
 
 export function fmtWeeklyDigest(summary: {

@@ -23,6 +23,7 @@
 import { fetchLivePrice } from '@/lib/fetcher'
 import { supabaseAdmin } from '@/lib/supabase'
 import { logEvent } from '@/lib/logger'
+import { sendTelegram, fmtTarget1Hit, fmtStopClosed } from '@/lib/telegram'
 import { Asset } from '@/types'
 
 export async function checkStopAlerts(
@@ -114,6 +115,18 @@ export async function checkStopAlerts(
           partial_price: hasPartial ? trade.partial_close_1_price : null,
         }, trade.asset)
 
+        // 🔔 Notifica via Telegram — stop atingido é ação imediata sobre posição aberta
+        await sendTelegram(fmtStopClosed(
+          trade.asset,
+          trade.direction,
+          price,
+          pnlPct,
+          pnlUsd,
+          hasPartial,
+          hasPartial ? trade.partial_close_1_price  : undefined,
+          hasPartial ? trade.partial_close_1_pnl_pct : undefined,
+        ))
+
         closed++
         continue  // pula demais checks para este trade
       }
@@ -138,7 +151,7 @@ export async function checkStopAlerts(
           ? +(trade.size * 0.5 * (pnl1Pct / lev / 100)).toFixed(2)
           : null
 
-        // Grava parcial + move stop para breakeven (silencioso — sem Telegram)
+        // Grava parcial + move stop para breakeven + notifica
         await db.from('trades').update({
           alerted_target1:         true,
           stop_price:              entry,
@@ -148,6 +161,16 @@ export async function checkStopAlerts(
           partial_close_1_at:      new Date().toISOString(),
           notes: `[AUTO] Parcial 50% registrado @ $${price.toFixed(2)} (+${pnl1Pct}%) | Stop → breakeven $${entry}`,
         }).eq('id', trade.id)
+
+        // 🔔 Notifica via Telegram — alvo 1 exige ação manual (fechar 50%)
+        await sendTelegram(fmtTarget1Hit(
+          trade.asset,
+          trade.direction,
+          price,
+          pnl1Pct,
+          entry,     // newStop = breakeven
+          pnl1Usd,
+        ))
 
         await logEvent('partial_close', {
           trade_id:          trade.id,
