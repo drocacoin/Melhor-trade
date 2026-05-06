@@ -64,68 +64,85 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, message: 'Poucos dados — mínimo 10 trades para evoluir' })
   }
 
-  // ── Para cada trade, buscar snapshots da data de entrada ──────────────────
-  const factorStats: Record<string, { wins: number; losses: number }> = {}
-  const assetFactorStats: Record<string, Record<string, { wins: number; losses: number }>> = {}
+  // ── Holdout split: treina em trades mais antigos, valida em mais recentes ──
+  // Trades estão ordenados desc (mais recente primeiro).
+  // Holdout = 20% mais recentes (simulação fora-de-amostra)
+  // Treino  = 80% mais antigos
+  const holdoutCount = Math.max(2, Math.floor(trades.length * 0.2))
+  const holdoutTrades = trades.slice(0, holdoutCount)
+  const trainTrades   = trades.slice(holdoutCount)
 
-  for (const factor of FACTORS) {
-    factorStats[factor.key] = { wins: 0, losses: 0 }
-  }
+  // ── Função auxiliar: extrai factor stats de um conjunto de trades ─────────
+  type FactorStats = Record<string, { wins: number; losses: number }>
+  type AssetStats  = Record<string, FactorStats>
 
-  for (const trade of trades) {
-    const isWin   = (trade.pnl_usd ?? 0) > 0
-    const isLong  = trade.direction === 'long'
-    const date    = trade.opened_at?.slice(0, 10)
+  async function computeFactorStats(tradeSet: NonNullable<typeof trades>): Promise<{ global: FactorStats; byAsset: AssetStats }> {
+    const global: FactorStats = {}
+    const byAsset: AssetStats = {}
+    for (const factor of FACTORS) global[factor.key] = { wins: 0, losses: 0 }
 
-    if (!date) continue
+    for (const trade of tradeSet) {
+      const isWin  = (trade.pnl_usd ?? 0) > 0
+      const isLong = trade.direction === 'long'
+      const date   = trade.opened_at?.slice(0, 10)
+      if (!date) continue
 
-    const { data: snaps } = await db
-      .from('snapshots')
-      .select('timeframe, wt_cross_up, wt_cross_down, wt_zone, bos_up, bos_down, price_vs_cloud, tenkan_vs_kijun, bias')
-      .eq('asset', trade.asset)
-      .gte('captured_at', `${date}T00:00:00`)
-      .lte('captured_at', `${date}T23:59:59`)
-      .order('captured_at', { ascending: true })
+      const { data: snaps } = await db
+        .from('snapshots')
+        .select('timeframe, wt_cross_up, wt_cross_down, wt_zone, bos_up, bos_down, price_vs_cloud, tenkan_vs_kijun, bias')
+        .eq('asset', trade.asset)
+        .gte('captured_at', `${date}T00:00:00`)
+        .lte('captured_at', `${date}T23:59:59`)
+        .order('captured_at', { ascending: true })
 
-    if (!snaps?.length) continue
+      if (!snaps?.length) continue
 
-    // Latest snapshot per timeframe for this trade's entry day
-    const byTf: Record<string, any> = {}
-    for (const s of snaps) { byTf[s.timeframe] = s }
+      const byTf: Record<string, any> = {}
+      for (const s of snaps) { byTf[s.timeframe] = s }
 
-    const h4 = byTf['4h']
-    const d  = byTf['1d']
-    const wk = byTf['1wk']
+      const h4 = byTf['4h']
+      const d  = byTf['1d']
+      const wk = byTf['1wk']
 
-    // Check which factors were present at entry
-    const active: Record<string, boolean> = {
-      wt_cross_oversold:   isLong  && h4?.wt_cross_up   && h4?.wt_zone === 'oversold',
-      bos_up:              isLong  && h4?.bos_up,
-      price_vs_cloud:      isLong  ? h4?.price_vs_cloud === 'above' : h4?.price_vs_cloud === 'below',
-      tenkan_vs_kijun:     isLong  ? h4?.tenkan_vs_kijun === 'above' : h4?.tenkan_vs_kijun === 'below',
-      daily_bias:          isLong  ? d?.bias === 'ALTISTA' : d?.bias === 'BAIXISTA',
-      weekly_bias:         isLong  ? wk?.bias === 'ALTISTA' : wk?.bias === 'BAIXISTA',
-      wt_cross_overbought: !isLong && h4?.wt_cross_down  && h4?.wt_zone === 'overbought',
-      bos_down:            !isLong && h4?.bos_down,
-    }
-
-    // Aggregate stats
-    for (const [factor, wasActive] of Object.entries(active)) {
-      if (!wasActive) continue
-      if (isWin) factorStats[factor].wins++
-      else       factorStats[factor].losses++
-
-      if (!assetFactorStats[trade.asset]) {
-        assetFactorStats[trade.asset] = {}
-        for (const f of FACTORS) assetFactorStats[trade.asset][f.key] = { wins: 0, losses: 0 }
+      const active: Record<string, boolean> = {
+        wt_cross_oversold:   isLong  && h4?.wt_cross_up   && h4?.wt_zone === 'oversold',
+        bos_up:              isLong  && h4?.bos_up,
+        price_vs_cloud:      isLong  ? h4?.price_vs_cloud === 'above' : h4?.price_vs_cloud === 'below',
+        tenkan_vs_kijun:     isLong  ? h4?.tenkan_vs_kijun === 'above' : h4?.tenkan_vs_kijun === 'below',
+        daily_bias:          isLong  ? d?.bias === 'ALTISTA' : d?.bias === 'BAIXISTA',
+        weekly_bias:         isLong  ? wk?.bias === 'ALTISTA' : wk?.bias === 'BAIXISTA',
+        wt_cross_overbought: !isLong && h4?.wt_cross_down  && h4?.wt_zone === 'overbought',
+        bos_down:            !isLong && h4?.bos_down,
       }
-      if (isWin) assetFactorStats[trade.asset][factor].wins++
-      else       assetFactorStats[trade.asset][factor].losses++
+
+      for (const [factor, wasActive] of Object.entries(active)) {
+        if (!wasActive) continue
+        if (isWin) global[factor].wins++
+        else       global[factor].losses++
+
+        if (!byAsset[trade.asset]) {
+          byAsset[trade.asset] = {}
+          for (const f of FACTORS) byAsset[trade.asset][f.key] = { wins: 0, losses: 0 }
+        }
+        if (isWin) byAsset[trade.asset][factor].wins++
+        else       byAsset[trade.asset][factor].losses++
+      }
     }
+    return { global, byAsset }
   }
 
-  // ── Calcular novos pesos ──────────────────────────────────────────────────
-  const overallWR = trades.filter(t => (t.pnl_usd ?? 0) > 0).length / trades.length
+  // Computa stats em paralelo para treino e holdout
+  const [trainResult, holdoutResult] = await Promise.all([
+    computeFactorStats(trainTrades),
+    computeFactorStats(holdoutTrades),
+  ])
+
+  const factorStats     = trainResult.global
+  const assetFactorStats = trainResult.byAsset
+
+  // ── Calcular novos pesos com validação holdout ────────────────────────────
+  const overallWR        = trainTrades.filter(t => (t.pnl_usd ?? 0) > 0).length / trainTrades.length
+  const holdoutOverallWR = holdoutTrades.filter(t => (t.pnl_usd ?? 0) > 0).length / holdoutTrades.length
   const changes: any[] = []
 
   for (const factor of FACTORS) {
@@ -133,13 +150,32 @@ export async function GET(req: NextRequest) {
     const total   = stats.wins + stats.losses
     if (total < 3) continue  // dados insuficientes para este fator
 
-    const factorWR   = stats.wins / total
+    const factorWR  = stats.wins / total
     // Peso = quão melhor este fator é vs a média geral
-    // WR do fator = overallWR → peso = 1.0 (neutro)
-    // WR do fator = 80%, overallWR = 50% → peso = 1.6 (forte)
-    // WR do fator = 20%, overallWR = 50% → peso = 0.4 (fraco)
-    const rawWeight  = overallWR > 0 ? factorWR / overallWR : 1.0
-    const newWeight  = Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(rawWeight * 10) / 10))
+    const rawWeight = overallWR > 0 ? factorWR / overallWR : 1.0
+    let   newWeight = Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(rawWeight * 10) / 10))
+
+    // ── Validação holdout: verifica consistência direcional ──────────────
+    // Se treino diz "fator bom" mas holdout diz "fator ruim" → possível overfit
+    let holdoutValidated = true
+    let holdoutNote      = ''
+    const hStats = holdoutResult.global[factor.key]
+    const hTotal = hStats.wins + hStats.losses
+
+    if (hTotal >= 2) {
+      const holdoutFactorWR  = hStats.wins / hTotal
+      const trainAboveBase   = factorWR   > overallWR
+      const holdoutAboveBase = holdoutFactorWR > holdoutOverallWR
+      // Consistente = ambos acima ou ambos abaixo da baseline
+      if (trainAboveBase !== holdoutAboveBase) {
+        holdoutValidated = false
+        holdoutNote = `holdout inconsistente (train WR=${Math.round(factorWR*100)}% vs holdout WR=${Math.round(holdoutFactorWR*100)}%)`
+        // Regressão para neutro — não aplica mudança extrema
+        newWeight = Math.round((newWeight + 1.0) / 2 * 10) / 10
+      } else {
+        holdoutNote = `ok (holdout WR=${Math.round(holdoutFactorWR*100)}%, n=${hTotal})`
+      }
+    }
 
     const { error } = await db.from('scoring_weights')
       .upsert({
@@ -161,13 +197,15 @@ export async function GET(req: NextRequest) {
         newWeight,
         factorWR: Math.round(factorWR * 100),
         total,
+        holdoutValidated,
+        holdoutNote,
       })
     }
   }
 
-  // ── Pesos por ativo específico ────────────────────────────────────────────
+  // ── Pesos por ativo específico (usando apenas trainTrades) ──────────────────
   for (const [asset, aStats] of Object.entries(assetFactorStats)) {
-    const assetTrades = trades.filter(t => t.asset === asset)
+    const assetTrades = trainTrades.filter(t => t.asset === asset)
     if (assetTrades.length < 5) continue  // mínimo 5 trades por ativo
 
     const assetWR = assetTrades.filter(t => (t.pnl_usd ?? 0) > 0).length / assetTrades.length
@@ -196,23 +234,28 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Claude Haiku interpreta as mudanças ───────────────────────────────────
+  const inconsistentCount = changes.filter(c => !c.holdoutValidated).length
   let aiInsights = ''
   if (changes.length > 0 && process.env.ANTHROPIC_API_KEY) {
     try {
       const changeLines = changes
-        .map(c => `${c.label}: WR=${c.factorWR}% | novo peso=${c.newWeight} | n=${c.total}`)
+        .map(c => {
+          const hvTag = c.holdoutValidated ? `✓ ${c.holdoutNote}` : `⚠ ${c.holdoutNote} → peso suavizado`
+          return `${c.label}: WR=${c.factorWR}% | peso=${c.newWeight} | n=${c.total} | ${hvTag}`
+        })
         .join('\n')
 
       const client  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
       const message = await client.messages.create({
         model:      'claude-haiku-4-5',
-        max_tokens: 300,
+        max_tokens: 350,
         messages:   [{
           role:    'user',
           content: `Analise esta evolução do sistema de scoring de um trader de swing trade.
-Explique em 2-3 frases o que os dados revelam sobre quais indicadores estão funcionando e qual impacto isso terá nos próximos sinais.
+Treino: ${trainTrades.length} trades (WR ${Math.round(overallWR * 100)}%) | Holdout: ${holdoutTrades.length} trades (WR ${Math.round(holdoutOverallWR * 100)}%) | ${inconsistentCount} fatores inconsistentes.
+Explique em 2-3 frases quais indicadores estão funcionando e se o modelo parece overfit.
 
-DADOS (${trades.length} trades analisados, WR geral: ${Math.round(overallWR * 100)}%):
+DADOS:
 ${changeLines}`,
         }],
       })
@@ -222,9 +265,12 @@ ${changeLines}`,
 
   // ── Salvar log da evolução ────────────────────────────────────────────────
   await db.from('evolution_log').insert({
-    trades_used: trades.length,
+    trades_used:     trades.length,
+    train_count:     trainTrades.length,
+    holdout_count:   holdoutTrades.length,
+    inconsistent_ct: inconsistentCount,
     changes,
-    ai_insights: aiInsights,
+    ai_insights:     aiInsights,
   })
 
   // ── Telegram ──────────────────────────────────────────────────────────────
@@ -233,17 +279,30 @@ ${changeLines}`,
       .sort((a, b) => Math.abs(b.newWeight - 1) - Math.abs(a.newWeight - 1))
       .slice(0, 4)
       .map(c => {
-        const arrow = c.newWeight > 1 ? '⬆️' : c.newWeight < 1 ? '⬇️' : '➡️'
-        return `${arrow} ${c.label}: WR ${c.factorWR}% → peso <b>${c.newWeight}x</b>`
+        const arrow  = c.newWeight > 1 ? '⬆️' : c.newWeight < 1 ? '⬇️' : '➡️'
+        const hvIcon = c.holdoutValidated ? '' : ' ⚠️'
+        return `${arrow} ${c.label}: WR ${c.factorWR}% → <b>${c.newWeight}x</b>${hvIcon}`
       })
       .join('\n')
 
+    const hvSummary = inconsistentCount > 0
+      ? `\n⚠️ ${inconsistentCount} fator(es) com holdout inconsistente — pesos suavizados`
+      : `\n✅ Todos os fatores validados no holdout`
+
     await sendTelegram(
-      `🧠 <b>Sistema evoluiu — ${trades.length} trades analisados</b>\n\n` +
-      `${topChanges}\n\n` +
+      `🧠 <b>Sistema evoluiu</b> (treino: ${trainTrades.length} | holdout: ${holdoutTrades.length})\n\n` +
+      `${topChanges}${hvSummary}\n\n` +
       (aiInsights ? `💡 <i>${aiInsights}</i>` : '')
     )
   }
 
-  return NextResponse.json({ ok: true, tradesAnalyzed: trades.length, changes, aiInsights })
+  return NextResponse.json({
+    ok: true,
+    tradesAnalyzed: trades.length,
+    trainCount:     trainTrades.length,
+    holdoutCount:   holdoutTrades.length,
+    inconsistentFactors: inconsistentCount,
+    changes,
+    aiInsights,
+  })
 }

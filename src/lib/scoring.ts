@@ -13,17 +13,32 @@
 import type { OIData } from '@/lib/fetcher'
 
 export interface LiveScore {
-  bullScore:   number
-  bearScore:   number
-  direction:   'bull' | 'bear' | 'neutral'
-  topScore:    number
-  maxPossible: number
+  bullScore:      number
+  bearScore:      number
+  direction:      'bull' | 'bear' | 'neutral'
+  topScore:       number
+  maxPossible:    number
+  confidence_pct: number   // 0-100, normalised topScore/maxPossible
   factors: {
     label:   string
     bull:    boolean
     bear:    boolean
     points:  number
   }[]
+}
+
+/**
+ * Converte pontuação bruta em probabilidade estimada (0-100).
+ * Sigmoid centrado em (threshold + 1):
+ *   score = threshold     → ~52 %  (sinal marginal)
+ *   score = threshold + 2 → ~73 %  (sinal sólido)
+ *   score = threshold + 4 → ~87 %  (sinal forte)
+ */
+export function scoreToConfidence(topScore: number, threshold: number): number {
+  const k   = 0.65              // inclinação da curva
+  const mid = threshold + 1.0   // ponto de inflexão
+  const p   = 1 / (1 + Math.exp(-k * (topScore - mid)))
+  return Math.round(Math.min(99, Math.max(10, p * 100)))
 }
 
 export function computeLiveScore(
@@ -143,9 +158,10 @@ export function computeLiveScore(
     }
   }
 
-  const topScore    = Math.max(bullScore, bearScore)
-  const direction   = bullScore > bearScore ? 'bull' : bearScore > bullScore ? 'bear' : 'neutral'
-  const maxPossible = 13  // v3: mesma base + OI como penalidade (não adiciona ao máximo)
+  const topScore      = Math.max(bullScore, bearScore)
+  const direction     = bullScore > bearScore ? 'bull' : bearScore > bullScore ? 'bear' : 'neutral'
+  const maxPossible   = 13  // v3: mesma base + OI como penalidade (não adiciona ao máximo)
+  const confidence_pct = Math.round(Math.min(99, Math.max(1, (topScore / maxPossible) * 100)))
 
-  return { bullScore, bearScore, direction, topScore, maxPossible, factors }
+  return { bullScore, bearScore, direction, topScore, maxPossible, confidence_pct, factors }
 }

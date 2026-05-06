@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchCandles, fetchFundingRate, fetchFearAndGreed, fetchLivePrice, fetchOpenInterestAll, OIData } from '@/lib/fetcher'
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
+import { scoreToConfidence } from '@/lib/scoring'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram, fmtSignal, fmtScanSummary } from '@/lib/telegram'
 import { checkStopAlerts } from '@/lib/stop-monitor'
@@ -332,8 +333,9 @@ function detectSignal(
   const target3 = isLong ? close + 8.0 * atr : close - 8.0 * atr   // RR 5.33:1
   const rr1     = 3.0 / 1.5  // = 2.0 sempre com ATR-based
 
-  const totalScore = isLong ? bullScore : bearScore
-  const grade      = totalScore >= minScore + 3 ? 'A+' : totalScore >= minScore + 1.5 ? 'A' : 'B'
+  const totalScore     = isLong ? bullScore : bearScore
+  const confidence_pct = scoreToConfidence(totalScore, minScore)
+  const grade          = totalScore >= minScore + 3 ? 'A+' : totalScore >= minScore + 1.5 ? 'A' : 'B'
 
   // Zona de entrada ±0.3% do preço atual (um pouco mais folgada que antes)
   const entryLow  = isLong ? close * 0.997 : close * 0.994
@@ -359,6 +361,7 @@ function detectSignal(
     cancellation: isLong
       ? `Fechamento diário abaixo de $${(swing_low * 0.99).toFixed(2)} (swing low)`
       : `Fechamento diário acima de $${(swing_high * 1.01).toFixed(2)} (swing high)`,
+    confidence_pct,
     analysis: '', status: 'active',
   }
 }

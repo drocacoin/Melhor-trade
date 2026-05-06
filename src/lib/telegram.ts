@@ -32,9 +32,13 @@ export function fmtSignal(
   const gradeMap: Record<string, string> = { 'A+': '⭐⭐', A: '⭐', B: '🔵', C: '🟡' }
   const stars    = gradeMap[signal.setup_grade] ?? ''
 
+  const confBadge = signal.confidence_pct != null
+    ? ` · <b>${signal.confidence_pct}%</b> conf`
+    : ''
+
   const lines = [
     `${emoji} <b>SINAL ${signal.setup_grade} ${stars} — ${signal.asset}</b>`,
-    `Direção: <b>${dir}</b>`,
+    `Direção: <b>${dir}</b>${confBadge}`,
     '',
   ]
 
