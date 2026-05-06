@@ -28,6 +28,7 @@ export type EventType =
   | 'circuit_breaker_cleared'
   | 'stop_auto_closed'
   | 'trailing_stop_moved'
+  | 'partial_close'
   | 'signal_generated'
 
 export async function logEvent(

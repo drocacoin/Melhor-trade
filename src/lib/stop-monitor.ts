@@ -2,12 +2,22 @@
  * Monitor de stop/alvo — detecta automaticamente quando uma posição aberta
  * atinge o stop loss ou os alvos, e age:
  *
- *  • Stop atingido  → fecha o trade no DB e envia notificação Telegram
- *  • Alvo 1 atingido → alerta Telegram (marca alerted_target1)
- *  • Alvo 2 atingido → alerta Telegram (marca alerted_target2)
- *  • Stop próximo   → alerta Telegram (quando < 20% do range restante)
+ *  • Stop atingido   → fecha o trade no DB (P&L mesclado se houve parcial)
+ *  • Alvo 1 atingido → grava parcial 50% + move stop para breakeven + Telegram
+ *  • Alvo 2 atingido → alerta Telegram
+ *  • Stop próximo    → alerta Telegram (quando < 20% do range restante)
  *
- * Chamado por scan (1h/1h) E scan-fast (30min) para máxima responsividade.
+ * Chamado por scan (1h) E scan-fast (30min) para máxima responsividade.
+ *
+ * ── Lógica de posição parcial ────────────────────────────────────────────────
+ * Quando alvo 1 é atingido:
+ *   1. Grava partial_close_1_price / partial_close_1_pnl_pct / partial_close_1_at
+ *   2. Move stop_price para entry (breakeven) — sem mais risco
+ *   3. Envia alerta "feche 50% agora em $X"
+ *
+ * Quando stop é atingido (com parcial já registrado):
+ *   P&L total = (pnl_parcial × 50%) + (pnl_final × 50%)
+ *   Ex: parcial +20%, final 0% (breakeven) → blended +10%
  */
 
 import { fetchLivePrice } from '@/lib/fetcher'
@@ -45,48 +55,81 @@ export async function checkStopAlerts(
     const lev   = trade.leverage ?? 1
     const stop  = trade.stop_price ?? trade.stop_loss
 
+    // ── Parcial já executado? ────────────────────────────────────────────────
+    const hasPartial    = trade.partial_close_1_price != null
+    const partialPct    = hasPartial ? (trade.partial_close_1_pct   ?? 50)  : 0
+    const remainingPct  = 100 - partialPct  // 50% se parcial tomado
+
     // ── 1. AUTO-CLOSE: stop cruzado ────────────────────────────────────────
     if (stop) {
       const stopHit = isLong ? price <= stop : price >= stop
 
       if (stopHit) {
-        const pnlPct = ((isLong ? price - entry : entry - price) / entry) * 100 * lev
-        const pnlUsd = trade.size
-          ? +(pnlPct / lev / 100 * trade.size).toFixed(2)
-          : null
+        // P&L da porção final (restante após parcial, ou 100% se sem parcial)
+        const finalPnlPct = ((isLong ? price - entry : entry - price) / entry) * 100 * lev
+
+        let pnlPct: number
+        let pnlUsd: number | null
+
+        if (hasPartial && partialPct > 0) {
+          // Blended P&L = média ponderada das duas porções
+          const partialPnlPct = trade.partial_close_1_pnl_pct ?? 0
+          pnlPct = +(
+            (partialPnlPct  * (partialPct   / 100)) +
+            (finalPnlPct    * (remainingPct / 100))
+          ).toFixed(2)
+
+          pnlUsd = trade.size != null ? +(
+            (trade.size * (partialPct   / 100) * (partialPnlPct / lev / 100)) +
+            (trade.size * (remainingPct / 100) * (finalPnlPct   / lev / 100))
+          ).toFixed(2) : null
+        } else {
+          pnlPct = +finalPnlPct.toFixed(2)
+          pnlUsd = trade.size != null
+            ? +(pnlPct / lev / 100 * trade.size).toFixed(2)
+            : null
+        }
 
         // eq('status','open') evita duplo fechamento em race condition
         await db.from('trades').update({
           status:      'closed',
           close_price: price,
           closed_at:   new Date().toISOString(),
-          pnl_pct:     +pnlPct.toFixed(2),
+          pnl_pct:     pnlPct,
           ...(pnlUsd !== null ? { pnl_usd: pnlUsd } : {}),
-          notes:       `[AUTO] Stop atingido @ $${price.toFixed(2)}`,
+          notes: hasPartial
+            ? `[AUTO] Stop atingido @ $${price.toFixed(2)} | parcial 50% @ $${trade.partial_close_1_price} já registrado`
+            : `[AUTO] Stop atingido @ $${price.toFixed(2)}`,
         }).eq('id', trade.id).eq('status', 'open')
 
-        // Log persistido no banco
         await logEvent('stop_auto_closed', {
-          trade_id:    trade.id,
-          direction:   trade.direction,
-          leverage:    lev,
-          entry_price: entry,
-          stop_price:  stop,
-          close_price: price,
-          pnl_pct:     +pnlPct.toFixed(2),
-          pnl_usd:     pnlUsd,
+          trade_id:     trade.id,
+          direction:    trade.direction,
+          leverage:     lev,
+          entry_price:  entry,
+          stop_price:   stop,
+          close_price:  price,
+          pnl_pct:      pnlPct,
+          pnl_usd:      pnlUsd,
+          had_partial:  hasPartial,
+          partial_price: hasPartial ? trade.partial_close_1_price : null,
         }, trade.asset)
 
         const pnlStr =
           `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%` +
-          (pnlUsd !== null ? ` ($${pnlUsd >= 0 ? '+' : ''}${pnlUsd.toFixed(0)})` : '')
+          (pnlUsd !== null ? ` (${ pnlUsd >= 0 ? '+' : ''}${pnlUsd.toFixed(0)})` : '')
+
+        const partialLine = hasPartial
+          ? `\n📤 Parcial 50%: <code>$${trade.partial_close_1_price}</code> (+${(trade.partial_close_1_pnl_pct ?? 0).toFixed(1)}%) já registrado`
+          : ''
 
         await sendTelegram(
           `🛑 <b>STOP ATINGIDO — ${trade.asset}</b>\n\n` +
           `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
           `Entrada: <code>$${entry}</code> → Stop: <code>$${stop}</code>\n` +
           `Fechado em: <code>$${price.toFixed(2)}</code>\n` +
-          `P&L: <b>${pnlStr}</b>\n\n` +
+          `P&L: <b>${pnlStr}</b>${hasPartial ? ' (blended 50%+50%)' : ''}\n` +
+          `${partialLine}\n\n` +
           `⚡ Trade fechado automaticamente.`
         )
 
@@ -104,36 +147,54 @@ export async function checkStopAlerts(
       }
     }
 
-    // ── 3. Alvo 1 — trailing stop para breakeven ─────────────────────────────
+    // ── 3. Alvo 1 — parcial 50% + trailing stop para breakeven ───────────────
     if (trade.target1 && !trade.alerted_target1) {
       const hit = isLong ? price >= trade.target1 : price <= trade.target1
       if (hit) {
+        const pnl1Pct = +((isLong
+          ? trade.target1 - entry
+          : entry - trade.target1) / entry * 100 * lev).toFixed(2)
         const movePct = Math.abs((trade.target1 - entry) / entry * 100).toFixed(1)
-        const pnl1    = ((isLong ? trade.target1 - entry : entry - trade.target1) / entry * 100 * lev).toFixed(1)
+        const pnl1Usd = trade.size != null
+          ? +(trade.size * 0.5 * (pnl1Pct / lev / 100)).toFixed(2)
+          : null
 
-        // Move stop para breakeven (entrada) automaticamente
+        // Grava parcial + move stop para breakeven
         await db.from('trades').update({
-          alerted_target1: true,
-          stop_price:      entry,   // trailing stop → breakeven
-          notes:           `[AUTO] Stop movido para breakeven $${entry} ao atingir alvo 1`,
+          alerted_target1:         true,
+          stop_price:              entry,          // trailing stop → breakeven
+          partial_close_1_price:   price,          // preço real de execução
+          partial_close_1_pct:     50,
+          partial_close_1_pnl_pct: pnl1Pct,
+          partial_close_1_at:      new Date().toISOString(),
+          notes: `[AUTO] Parcial 50% registrado @ $${price.toFixed(2)} (+${pnl1Pct}%) | Stop → breakeven $${entry}`,
         }).eq('id', trade.id)
 
-        await logEvent('trailing_stop_moved', {
-          trade_id:  trade.id,
-          direction: trade.direction,
-          old_stop:  stop,
-          new_stop:  entry,
-          target1:   trade.target1,
-          price_at_target: price,
+        await logEvent('partial_close', {
+          trade_id:          trade.id,
+          direction:         trade.direction,
+          leverage:          lev,
+          entry_price:       entry,
+          partial_price:     price,
+          partial_pct:       50,
+          partial_pnl_pct:   pnl1Pct,
+          partial_pnl_usd:   pnl1Usd,
+          old_stop:          stop,
+          new_stop:          entry,
         }, trade.asset)
 
+        const usdLine = pnl1Usd != null
+          ? ` (+$${pnl1Usd.toFixed(0)} na metade)`
+          : ''
+
         await sendTelegram(
-          `🎯 <b>ALVO 1 ATINGIDO — ${trade.asset}</b>\n\n` +
+          `📤 <b>ALVO 1 — FECHE 50% AGORA — ${trade.asset}</b>\n\n` +
           `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
-          `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
-          `Alvo 1: <code>$${trade.target1}</code> (+${movePct}% move | P&L +${pnl1}%)\n\n` +
-          `🔄 <b>Stop movido para breakeven</b>: <code>$${entry}</code>\n` +
-          `💡 Feche 50% da posição para garantir o lucro.`
+          `Preço: <code>$${price.toFixed(2)}</code> | Alvo 1: <code>$${trade.target1}</code>\n` +
+          `Move: +${movePct}% | P&L parcial: <b>+${pnl1Pct}%</b>${usdLine}\n\n` +
+          `✅ Parcial registrado automaticamente no sistema\n` +
+          `🔄 Stop movido para <b>breakeven</b>: <code>$${entry}</code>\n\n` +
+          `📊 Restante: 50% aberto sem risco | aguarda alvo 2 ou trailing stop`
         )
         alerted++
       }
@@ -150,7 +211,7 @@ export async function checkStopAlerts(
           `Posição: <b>${trade.direction.toUpperCase()}</b> ${lev}x\n` +
           `Preço atual: <code>$${price.toFixed(2)}</code>\n` +
           `Alvo 2: <code>$${trade.target2}</code> (+${movePct}% move | P&L +${pnl2}%)\n\n` +
-          `💡 Feche mais 25% e deixe o restante correr com stop no alvo 1.`
+          `💡 Pode fechar os ${hasPartial ? '50%' : '25%'} restantes ou manter até alvo 3.`
         )
         await db.from('trades').update({ alerted_target2: true }).eq('id', trade.id)
         alerted++
