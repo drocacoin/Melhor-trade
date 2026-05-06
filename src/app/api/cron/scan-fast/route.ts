@@ -18,6 +18,7 @@ import { fetchCandles, fetchFearAndGreed, fetchFundingRate, fetchOpenInterestAll
 import { fetchWhaleSentiment } from '@/lib/whales'
 import { fetchNewsSentiment } from '@/lib/news'
 import { computeSnapshot, computeSignalFactors, SignalFactors } from '@/lib/indicators'
+import { scoreToConfidence } from '@/lib/scoring'
 import { computeThreshold } from '@/lib/threshold'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendTelegram } from '@/lib/telegram'
@@ -250,15 +251,16 @@ export async function GET(req: NextRequest) {
 
     // ── Tipo 1: SINAL (score ≥ threshold) ───────────────────────────────────
     if (topScore >= threshold && !alreadyActive.has(asset) && !cb.triggered) {
-      const newsTag   = newsAsset ? ` | 📰 ${newsAsset.sentiment}${influencerTag(newsAsset)}` : ''
-      const whaleTag  = whale ? ` | 🐳 ${whale.sentiment}` : ''
-      const tweetLine = newsAsset?.tweetCount
+      const confidence = scoreToConfidence(topScore, threshold)
+      const newsTag    = newsAsset ? ` | 📰 ${newsAsset.sentiment}${influencerTag(newsAsset)}` : ''
+      const whaleTag   = whale ? ` | 🐳 ${whale.sentiment}` : ''
+      const tweetLine  = newsAsset?.tweetCount
         ? `\n🐦 ${newsAsset.tweetCount} tweet(s): <i>${(newsAsset.headlines[0] ?? '').slice(0, 90)}</i>`
         : ''
       alertBucket.push({
         asset, dir, type: 'signal', score: topScore, gap,
         text:
-          `${dir === 'long' ? '🟢' : '🔴'} <b>${asset}</b> ${dir.toUpperCase()}\n` +
+          `${dir === 'long' ? '🟢' : '🔴'} <b>${asset}</b> ${dir.toUpperCase()} · <b>${confidence}%</b> conf\n` +
           `Score: <b>${topScore.toFixed(1)}</b>/${threshold}${newsTag}${whaleTag}\n` +
           `Preço: <code>${priceStr}</code>${tweetLine}`,
       })
